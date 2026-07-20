@@ -1,0 +1,2133 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+<meta name="theme-color" content="#0d1b2a">
+<title>风的累积 · Wind Accumulation</title>
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="风的累积">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+/* ============ WIND ACCUMULATION — surface-analysis instrument ============
+   Release version lives in sw.js (const CACHE) — bump there on every release.
+   Palette: atmospheric night base; convergence = warm bloom (air piling up),
+            divergence = cool teal (air spreading). Wind ink = pale slate.
+   Convergence is the subject, so it owns the only warm colour on the page. */
+:root{
+  --base:#0d1b2a; --panel:#14273b; --panel2:#1b344f;
+  --ink:#e8eef4; --muted:#8ba3bd; --line:#24405c;
+  --cvg1:#fde68a; --cvg2:#fb923c; --cvg3:#dc2626;   /* accumulation ramp */
+  --div:#38bdf8;                                     /* dispersal */
+  --accent:#f59e0b;
+  --ok:#34d399; --warn:#fbbf24; --bad:#f87171;
+  --shadow:0 6px 24px rgba(0,0,0,.45);
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--base); color:var(--ink); font-family:var(--sans);
+  font-size:15px; line-height:1.5; overflow-x:hidden;
+}
+.wrap{max-width:820px;margin:0 auto;padding:14px 14px 24px}
+
+/* Header */
+header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.title h1{font-size:22px;margin:0;letter-spacing:.5px;font-weight:800}
+.title .sub{font-size:12px;color:var(--muted);margin-top:2px;font-family:var(--mono);letter-spacing:.5px}
+.title .cn{font-size:13px;color:var(--muted);margin-top:1px}
+.langbtn{background:var(--panel);border:1px solid var(--line);color:var(--ink);
+  border-radius:10px;padding:8px 12px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
+.langbtn:active{transform:scale(.96)}
+
+/* Controls row */
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.btn.geo{flex:1}
+#refreshBtn,#goBtn{flex:0 0 116px;text-align:center}
+.manualrow{display:flex;gap:8px;margin-bottom:6px}
+.manualrow .latlon{flex:1;display:flex;gap:8px;min-width:0}
+.manualrow input{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);color:var(--ink);
+  border-radius:10px;padding:9px 11px;font-size:14px;font-family:var(--mono)}
+.manualrow input::placeholder{color:var(--muted);font-family:var(--sans);font-size:12.5px}
+.gpsinfo{font-size:11.5px;color:var(--muted);font-family:var(--mono);min-height:15px;margin-bottom:6px}
+.gpsinfo.err{color:var(--warn)}
+select,.btn{background:var(--panel);border:1px solid var(--line);color:var(--ink);
+  border-radius:10px;padding:9px 12px;font-size:13.5px;font-family:var(--sans);cursor:pointer}
+.btn{font-weight:700}
+.btn.primary{background:var(--accent);color:#231400;border-color:var(--accent)}
+.btn:active,select:active{transform:scale(.97)}
+.btn[disabled]{opacity:.5;pointer-events:none}
+
+/* Map */
+.mapwrap{position:relative}
+.scrolltouch{position:absolute;top:84px;bottom:0;width:42px;z-index:600;cursor:pointer;touch-action:pan-y}
+.scrolltouch.left{left:0;background:linear-gradient(90deg,rgba(255,255,255,.05),rgba(255,255,255,0));border-radius:0 0 0 14px}
+.scrolltouch.right{right:0;background:linear-gradient(270deg,rgba(255,255,255,.05),rgba(255,255,255,0));border-radius:0 0 14px 0}
+#map{height:min(64vh,660px);min-height:420px;border-radius:14px;border:1px solid var(--line);box-shadow:var(--shadow);
+  background:#0a1521;overflow:hidden;z-index:1}
+.leaflet-container{background:#0a1521;font-family:var(--sans)}
+.arrow{transition:transform .15s}
+.arrow svg{display:block;filter:drop-shadow(0 1px 1px rgba(0,0,0,.6))}
+.focuspin{background:transparent!important;border:none!important;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6))}
+
+/* Readout card */
+.readout{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:14px;margin-top:12px;box-shadow:var(--shadow)}
+.readout .loc{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
+.focusfav{margin-left:auto;background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+  border-radius:9px;width:34px;height:30px;font-size:16px;cursor:pointer;flex:none;line-height:1}
+.focusfav.on{color:#ffb51a;border-color:rgba(255,181,26,.5);background:rgba(255,181,26,.12)}
+.focusfav:active{transform:scale(.92)}
+.gauge{display:flex;align-items:baseline;gap:10px;margin:6px 0 2px}
+.gauge .val{font-size:38px;font-weight:800;font-family:var(--mono);line-height:1}
+.gauge .unit{font-size:13px;color:var(--muted);font-family:var(--mono)}
+.windwarn{margin-top:8px;padding:9px 12px;border-radius:10px;font-size:13.5px;font-weight:800;
+  background:rgba(245,180,60,.16);border:1px solid rgba(245,180,60,.55);color:#ffcf7a}
+.windwarn.severe{background:rgba(220,38,38,.18);border-color:rgba(220,38,38,.6);color:#fca5a5}
+.cat{display:inline-block;padding:4px 12px;border-radius:999px;font-size:13px;font-weight:800;margin-top:4px}
+.depthtag{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;margin:4px 0 0 6px;border:1px solid var(--line)}
+.depthtag.deep{color:var(--ok);border-color:rgba(52,211,153,.5);background:rgba(52,211,153,.10)}
+.depthtag.shallow{color:var(--muted)}
+.surgebadge{display:inline-block;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:800;margin:4px 0 0 6px;
+  color:#dbeafe;background:rgba(56,189,248,.18);border:1px solid rgba(56,189,248,.55)}
+.orobadge{display:inline-block;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:800;margin:4px 0 0 6px;
+  color:#fde9c8;background:rgba(180,120,60,.20);border:1px solid rgba(180,120,60,.6)}
+.verdict{margin-top:12px;padding:11px 13px;border-radius:11px;font-weight:800;font-size:15px;
+  display:flex;align-items:center;gap:8px}
+.verdict .dot{width:9px;height:9px;border-radius:50%;background:currentColor;flex:none;opacity:.9}
+.ingredients{display:flex;gap:7px;margin-top:9px;flex-wrap:wrap}
+.chip{flex:1;min-width:96px;border:1px solid var(--line);border-radius:10px;padding:8px 9px;
+  background:var(--base);display:flex;flex-direction:column;gap:2px}
+.chip .cname{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:5px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.4px}
+.chip .cval{font-size:15px;font-weight:800;font-family:var(--mono)}
+.chip .mk{margin-right:5px;font-weight:800}
+.chip.on .mk{color:var(--warn)}
+.chip.strong .mk{color:var(--bad)}
+.chip.off .mk{color:var(--muted)}
+.chip .tick{width:8px;height:8px;border-radius:50%;flex:none;background:var(--line)}
+.chip.on .tick{background:var(--warn)}
+.chip.strong .tick{background:var(--bad);box-shadow:0 0 6px var(--bad)}
+.chip.on .cval{color:var(--ink)}
+.chip.off .cval{color:var(--muted)}
+.meta{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12.5px;color:var(--muted);font-family:var(--mono)}
+.meta b{color:var(--ink);font-weight:700}
+.meta .mcat{font-weight:800;font-size:11px;margin-left:1px}
+.confcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:12px;box-shadow:var(--shadow)}
+.approachcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:13px 14px;margin-top:12px;box-shadow:var(--shadow)}
+.approachcard .aptitle{font-size:12px;color:var(--muted);font-family:var(--mono);letter-spacing:.5px;text-transform:uppercase;margin-bottom:7px}
+.apmain{font-size:16px;font-weight:800}
+.apmain.rain{color:#7dd3fc}
+.apmain.dry{color:var(--muted);font-weight:700;font-size:14px}
+.apmain .apsub{font-size:13px;color:var(--muted);font-weight:600}
+.apsub2{font-size:13px;color:#cdd9e6;margin-top:4px}
+.aprates{margin-top:6px;font-size:12.5px;font-family:var(--mono);color:#9db4cf;display:flex;flex-wrap:wrap;gap:9px;align-items:baseline}
+.aprates .appk{color:#7dd3fc;font-weight:800}
+.aprates .apunit{color:var(--muted);font-weight:700}
+.apnote{font-size:11px;color:var(--muted);margin-top:8px;font-family:var(--mono);line-height:1.5}
+.confcard .btn{font-size:13px;padding:8px 12px}
+.confbody{margin-top:10px;font-size:13px}
+.confbody:empty{display:none}
+.confhead{font-weight:800;font-size:14px;margin-bottom:8px}
+.confhead .cfsub{color:var(--muted);font-weight:600;font-size:12px;font-family:var(--mono)}
+.confrow{display:flex;align-items:center;gap:8px;margin:5px 0}
+.cflab{flex:0 0 64px;color:var(--muted);font-size:12px}
+.cfbarwrap{flex:1;height:8px;background:var(--base);border-radius:6px;overflow:hidden;border:1px solid var(--line)}
+.cfbar{display:block;height:100%;border-radius:6px;transition:width .3s}
+.cfpct{flex:0 0 40px;text-align:right;font-family:var(--mono);font-size:12.5px}
+.cfnote{color:var(--muted);font-size:11px;margin-top:8px;font-family:var(--mono);line-height:1.5}
+
+/* Timeline */
+.timeline{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:12px 12px 8px;margin-top:12px;box-shadow:var(--shadow)}
+.timeline .tlhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.timeline .tlhead .lab{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.timeline .whenbig{font-size:14px;font-weight:700}
+#spark{width:100%;height:70px;display:block;touch-action:none;cursor:pointer}
+input[type=range]{width:100%;margin:8px 0 2px;accent-color:var(--accent)}
+
+/* Legend */
+.legend{display:flex;align-items:center;gap:4px;margin-top:9px;font-size:11.5px;color:#cdd9e6;font-family:var(--mono);flex-wrap:wrap}
+.irrow{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
+.irbtn{font-size:12.5px;padding:7px 12px}
+.irbtn.on{background:var(--accent);color:#231400;border-color:var(--accent)}
+.irtime{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.irtime.irresume{color:var(--accent);cursor:pointer;font-weight:700}
+.iropacity{flex:1;min-width:110px;accent-color:var(--accent)}
+.seedmark,.favmark{display:flex!important;align-items:center;justify-content:center;line-height:1;
+  background:transparent!important;border:none!important;box-shadow:none!important;cursor:pointer}
+.seedmark{color:#ffd94d;font-size:12px;text-shadow:0 0 2px #000,0 0 1px #000}
+.favmark{color:#ffb51a;font-size:20px;font-weight:900;text-shadow:0 0 4px #000,0 0 8px rgba(255,180,0,.55),0 1px 2px #000}
+.locsheet{position:fixed;inset:0;z-index:1200;background:rgba(6,12,22,.55);display:none;align-items:flex-end;justify-content:center}
+.locsheet.on{display:flex}
+.locsheet-inner{background:var(--panel);width:100%;max-width:560px;border-radius:20px 20px 0 0;max-height:82vh;
+  display:flex;flex-direction:column;padding:14px 14px calc(14px + env(safe-area-inset-bottom));box-shadow:0 -8px 30px rgba(0,0,0,.5)}
+.locsheet-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.locsheet-title{font-size:16px;font-weight:800}
+.locsheet-x{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:9px;width:32px;height:32px;font-size:14px;cursor:pointer}
+.locsearch{width:100%;background:var(--base);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px 12px;font-size:14px;font-family:var(--sans);margin-bottom:9px}
+.locsave{width:100%;background:rgba(245,180,60,.14);border:1px solid rgba(245,180,60,.5);color:var(--accent);border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:9px}
+.locsave:active{transform:scale(.99)}
+.locbody{overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1}
+.locgrouph{font-size:12.5px;font-weight:800;color:#cdd9e6;font-family:var(--mono);padding:11px 4px 9px;position:sticky;top:0;background:var(--panel);cursor:pointer;display:flex;align-items:center;gap:7px;border-bottom:1px solid var(--line)}
+.locgrouph.static{cursor:default}
+.locgrouph:active:not(.static){background:var(--panel2)}
+.locgrouph .lgcaret{color:#8ba3bd;font-size:10px;width:10px;flex:none}
+.locgrouph .lgname{flex:1;min-width:0}
+.locgrouph .locn{color:var(--muted);font-weight:600;background:var(--base);border:1px solid var(--line);border-radius:999px;padding:1px 8px;font-size:11px}
+.locrow{display:flex;gap:6px;align-items:stretch;margin-bottom:5px}
+.locstar{flex:0 0 34px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:9px;font-size:15px;cursor:pointer}
+.locstar.on{color:#ffd24d;border-color:rgba(255,210,77,.5)}
+.locstar:active{transform:scale(.9)}
+.locjump{flex:1;text-align:left;background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:9px;
+  padding:9px 11px;font-size:13.5px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;gap:2px;min-width:0}
+.locjump:active{background:var(--accent);color:#231400}
+.locjump.dim{opacity:.55}
+.loccoord{font-size:11px;color:var(--muted);font-family:var(--mono)}
+.locjump:active .loccoord{color:#231400}
+.locedit,.locrestore{flex:0 0 38px;background:var(--panel2);border:1px solid var(--line);color:#9db4cf;border-radius:9px;font-size:13px;cursor:pointer}
+.locdel{flex:0 0 38px;background:var(--panel2);border:1px solid var(--line);color:#f87171;border-radius:9px;font-size:13px;cursor:pointer}
+.locpurge{width:100%;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.4);color:#f87171;border-radius:9px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;margin:4px 0 8px}
+.locempty{color:var(--muted);text-align:center;padding:24px;font-size:13px}
+#wtoast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(12px);background:#0d1a2c;border:1px solid var(--line);color:var(--ink);
+  padding:9px 16px;border-radius:999px;font-size:13px;z-index:1400;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;box-shadow:0 6px 20px rgba(0,0,0,.4)}
+#wtoast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.legend .sw{width:26px;height:14px;border-radius:3px;display:inline-block;border:1px solid rgba(255,255,255,.35);box-shadow:0 1px 2px rgba(0,0,0,.4)}
+.legend .grp{display:flex;align-items:center;gap:5px;margin-right:12px}
+
+/* Explainer */
+details{background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-top:12px;overflow:hidden}
+summary{padding:13px 14px;cursor:pointer;font-weight:700;font-size:14px;list-style:none;display:flex;justify-content:space-between;align-items:center}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"＋";color:var(--muted)}
+details[open] summary::after{content:"－"}
+.exp{padding:0 14px 14px;font-size:13.5px;color:#cdd9e6}
+.exp p{margin:8px 0}
+.exp .warnbox{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);
+  border-radius:10px;padding:10px 12px;color:#ffd98a;font-size:12.5px}
+.exp code{font-family:var(--mono);background:#0a1521;padding:1px 5px;border-radius:4px;font-size:12px}
+
+/* status / toast */
+#status{text-align:center;font-size:12.5px;color:var(--muted);min-height:18px;margin-top:8px;font-family:var(--mono)}
+.credit{text-align:center;font-size:11px;color:var(--muted);line-height:1.6;margin-top:6px;padding:0 4px}
+.credit a{color:#9db4cf;text-decoration:none;border-bottom:1px dotted #46617f}
+.credit a:active{opacity:.6}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--accent);
+  border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.toast{position:fixed;left:50%;bottom:78px;transform:translateX(-50%) translateY(20px);opacity:0;
+  background:#233;color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;pointer-events:none;
+  transition:.25s;z-index:9999;box-shadow:var(--shadow);max-width:90vw;text-align:center}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* footer action bar */
+.actionbar{display:flex;gap:10px;justify-content:center;margin-top:16px;padding:0 0 calc(6px + env(safe-area-inset-bottom))}
+.actionbar .btn{flex:1;max-width:none;text-align:center}
+.wa{background:#25D366;color:#fff;border-color:#25D366;font-weight:800;display:flex;align-items:center;justify-content:center;gap:9px}
+.wa .wa-logo{flex:none}
+.wa-word{font-size:16px;letter-spacing:.2px}
+.morn{background:var(--accent);color:#231400;border-color:var(--accent);font-weight:800}
+
+/* overlay segmented toggle */
+.seg{display:flex;gap:0;margin-top:10px;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.segbtn{flex:1;background:transparent;border:none;color:var(--muted);padding:9px 8px;font-size:13px;font-weight:700;
+  cursor:pointer;font-family:var(--sans)}
+.segbtn.active{background:var(--panel2);color:var(--ink)}
+.segbtn:active{transform:scale(.98)}
+
+/* morning modal */
+.modal{position:fixed;inset:0;background:rgba(5,10,18,.72);display:none;align-items:flex-end;justify-content:center;
+  z-index:2000;backdrop-filter:blur(3px)}
+.modal.show{display:flex}
+.sheet{background:var(--panel);border:1px solid var(--line);border-radius:18px 18px 0 0;width:100%;max-width:820px;
+  padding:16px 16px calc(20px + env(safe-area-inset-bottom));box-shadow:0 -8px 30px rgba(0,0,0,.5);
+  animation:rise .22s ease}
+@keyframes rise{from{transform:translateY(30px);opacity:.6}to{transform:translateY(0);opacity:1}}
+.sheethead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-weight:800;font-size:16px}
+.xbtn{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:2px 6px}
+#shareText{width:100%;background:var(--base);color:var(--ink);border:1px solid var(--line);border-radius:12px;
+  padding:12px;font-size:14.5px;line-height:1.6;font-family:var(--sans);resize:vertical}
+.sheetbtns{display:flex;gap:10px;margin-top:12px}
+.sheetbtns .btn{flex:1;text-align:center}
+.btn.ghost{background:transparent;color:var(--muted);border-color:var(--line);flex:0 0 auto;padding-left:16px;padding-right:16px}
+.sheetnote{font-size:11.5px;color:var(--muted);margin-top:10px;font-family:var(--mono);text-align:center}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media (max-width:480px){#map{height:min(62vh,600px);min-height:400px}.gauge .val{font-size:32px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title">
+      <h1 id="t-title">风的累积</h1>
+      <div class="sub" id="t-sub">雷暴 · 降雨 · 强风预警</div>
+    </div>
+    <button class="langbtn" id="langBtn" onclick="toggleLang()">🌐 中文</button>
+  </header>
+
+  <div class="controls">
+    <button class="btn geo" id="geoBtn" onclick="useMyLocation()">📍 <span id="t-geo">当前位置</span></button>
+    <button class="btn primary" id="refreshBtn" onclick="loadData()">↻ <span id="t-refresh">更新</span></button>
+  </div>
+  <div class="manualrow">
+    <div class="latlon">
+      <input id="inLat" inputmode="decimal" placeholder="纬度 3.155">
+      <input id="inLon" inputmode="decimal" placeholder="经度 102.400">
+    </div>
+    <button class="btn" id="goBtn" onclick="goManual()"><span id="t-go">查看</span></button>
+  </div>
+  <div id="gpsInfo" class="gpsinfo"></div>
+
+  <div class="mapwrap">
+    <div id="map"></div>
+    <div class="scrolltouch left" onclick="scrollToOutlook()" aria-label="Swipe to scroll the page"></div>
+    <div class="scrolltouch right" onclick="scrollToOutlook()" aria-label="Swipe to scroll the page"></div>
+  </div>
+  <div class="seg" id="overlaySeg">
+    <button class="segbtn active" data-mode="combo" onclick="setOverlay('combo')" id="seg-combo">综合</button>
+    <button class="segbtn" data-mode="cvg" onclick="setOverlay('cvg')" id="seg-cvg">辐合</button>
+    <button class="segbtn" data-mode="cvg850" onclick="setOverlay('cvg850')" id="seg-cvg850">850</button>
+    <button class="segbtn" data-mode="mfc" onclick="setOverlay('mfc')" id="seg-mfc">MFC</button>
+    <button class="segbtn" data-mode="cape" onclick="setOverlay('cape')" id="seg-cape">CAPE</button>
+    <button class="segbtn" data-mode="terr" onclick="setOverlay('terr')" id="seg-terr">地形</button>
+  </div>
+  <div class="legend" id="legend"></div>
+  <div class="irrow">
+    <button class="btn irbtn" id="irBtn" onclick="toggleIR()">🛰 <span id="t-ir">卫星红外</span></button>
+    <button class="btn irbtn" id="locBtn" onclick="openLocs()">📍 <span id="t-loc">地点</span></button>
+    <button class="btn irbtn on" id="seedBtn" onclick="toggleSeeds()" title="markers">★</button>
+    <span class="irtime" id="irTime" onclick="irResume()"></span>
+    <input type="range" id="irOpacity" class="iropacity" min="15" max="100" value="60" oninput="setIrOpacity(this.value)" style="display:none">
+  </div>
+
+  <div class="timeline" id="timeline" style="display:none">
+    <div class="tlhead">
+      <span class="lab" id="t-tl">未来辐合趋势 · 拖动查看</span>
+      <span class="whenbig" id="tl-when"></span>
+    </div>
+    <canvas id="spark"></canvas>
+    <input type="range" id="hourSlider" min="0" max="47" value="0" oninput="onSlide(this.value)">
+  </div>
+
+  <div class="readout" id="readout" style="display:none">
+    <div class="loc"><span id="r-loc"></span><button class="focusfav" id="focusFav" onclick="toggleFocusFav()" title="favourite">☆</button></div>
+    <div class="gauge">
+      <span class="val" id="r-val">—</span>
+      <span class="unit">×10⁻⁵ s⁻¹</span>
+    </div>
+    <span class="cat" id="r-cat"></span>
+    <span class="depthtag" id="r-depth"></span>
+    <span class="surgebadge" id="r-surge" style="display:none"></span>
+    <span class="orobadge" id="r-oro" style="display:none"></span>
+    <div class="verdict" id="r-verdict"></div>
+    <div class="windwarn" id="r-windwarn" style="display:none"></div>
+    <div class="ingredients" id="r-ing"></div>
+    <div class="meta">
+      <span><b id="r-wind">—</b> <span id="t-wind">风</span></span>
+      <span><b id="r-rh">—</b> <span id="t-rh">湿度</span> <b id="r-rh-cat" class="mcat"></b></span>
+      <span><b id="r-pr">—</b> <span id="t-pr">降水</span> <b id="r-pr-cat" class="mcat"></b></span>
+    </div>
+  </div>
+
+  <div class="approachcard" id="approachCard" style="display:none">
+    <div class="aptitle" id="t-appr">🌧 降雨来临</div>
+    <div class="approachbody" id="approachBody"></div>
+  </div>
+
+  <div class="confcard" id="confCard" style="display:none">
+    <button class="btn" id="confBtn" onclick="loadConfidence()">🎯 <span id="t-conf">集合信心</span></button>
+    <div class="confbody" id="confBody"></div>
+  </div>
+
+  <details>
+    <summary id="t-exp-h">什么是风的累积？</summary>
+    <div class="exp">
+      <p id="exp1"></p>
+      <p id="exp2"></p>
+      <p id="exp3"></p>
+      <div class="warnbox" id="exp-warn"></div>
+    </div>
+  </details>
+
+  <div id="status"></div>
+
+  <div class="actionbar">
+  <button class="btn wa" onclick="openShare()" aria-label="Share to WhatsApp">
+    <svg class="wa-logo" viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>
+    <span class="wa-word">WhatsApp</span>
+  </button>
+  </div>
+
+  <div class="credit" id="credit"></div>
+</div>
+
+<div class="locsheet" id="locSheet">
+  <div class="locsheet-inner">
+    <div class="locsheet-top">
+      <div class="locsheet-title" id="t-loc-title">地点</div>
+      <button class="locsheet-x" onclick="closeLocs()" aria-label="close">✕</button>
+    </div>
+    <input type="text" id="locSearch" class="locsearch" placeholder="搜索…" oninput="renderLocs()">
+    <button class="locsave" onclick="saveFav()" id="t-loc-save">➕ 收藏当前位置</button>
+    <div class="locbody" id="locBody"></div>
+  </div>
+</div>
+
+<div class="modal" id="shareModal" onclick="if(event.target===this)closeShare()">
+  <div class="sheet">
+    <div class="sheethead">
+      <span id="m-title">分享到 WhatsApp</span>
+      <button class="xbtn" onclick="closeShare()">✕</button>
+    </div>
+    <textarea id="shareText" rows="10" spellcheck="false"></textarea>
+    <div class="sheetbtns">
+      <button class="btn wa" onclick="sendShare()">💬 <span id="m-send">发送</span></button>
+      <button class="btn ghost" onclick="closeShare()"><span id="m-cancel">取消</span></button>
+    </div>
+    <div class="sheetnote" id="m-note"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* ================= CONFIG ================= */
+const GRID_N = 9;                 // 9x9 sample grid → 7x7 interior cells
+const SPACING = 0.20;             // degrees (~22 km) — matched to ECMWF IFS 0.25° upper-air
+const CENTER = (GRID_N-1)/2;      // centre grid index
+const ARROW_STRIDE = 2;           // draw wind arrows every Nth point (keep map readable)
+// Hybrid resolution: winds/T/RH stay at IFS 0.25° (only ECMWF model with 925/850 hPa);
+// CAPE + precipitation come from IFS HRES 9km (surface fields ARE finer there).
+// Flip false for a single-resolution 0.25° source. Labels update to match.
+const CAPE_HIRES = true;
+const SURF_RES = CAPE_HIRES ? '9km' : '0.25°';   // resolution of CAPE + precipitation
+const FORECAST_HOURS = 48;
+/* ================= CALIBRATION BLOCK =================
+   All thresholds live here so they're easy to tune on-device.
+   Values below are physically-grounded starting points for 925 hPa boundary-layer
+   convergence at ECMWF IFS 0.25° resolution — NOT fitted to observed local data yet.
+   925 hPa convergence runs larger/sharper than the old 10 m surface values, so the
+   bands are raised: background noise sits near 1e-5, meaningful CI convergence from
+   ~5e-5, strong mesoscale lines 2e-4+. Watch real active vs calm afternoons and
+   nudge these until the categories match what actually fires. */
+const TH = { weak:0.5e-4, mod:1.0e-4, strong:2.0e-4 };   // 925 hPa convergence, s^-1
+const CVG_RAMP_MAX = 2.5e-4;                              // deep-red ceiling for convergence overlay
+// Moisture-flux convergence overlay ceiling (g/kg per hour)
+const MFC_RAMP_MAX = 6.0;
+// MFC bands (g/kg·h) and derived-ascent bands (cm/s) for the readout qualifiers
+const MFC_TH = { weak:1.0, mod:3.0, strong:6.0 };
+const ASC_TH = { weak:7.5, mod:15,  strong:30 };   // = convergence bands × depth
+// Monsoon surge: strong sustained 850 hPa flow from the N–E quadrant (NE monsoon, Nov–Mar)
+const SURGE = { spd:12, dirMin:330, dirMax:90 };   // m/s, meteorological FROM direction
+// Orographic (upslope) lift bands, cm/s: air flowing toward rising terrain = forced ascent
+const ORO_TH = { on:5, strong:20 };
+// Himawari-9 IR (Band 13 clean window) animated loop via NASA GIBS. 10-min frames.
+const HIMAWARI = {
+  layer:'Himawari_AHI_Band13_Clean_Infrared',
+  tms:'GoogleMapsCompatible_Level6',   // 2km IR tile matrix set (adjust if tiles 404)
+  maxZoom:6, frames:12, stepMin:10, latencyMin:55, opacity:0.6, playMs:950, holdMs:2400, fadeMs:220,
+  autostopMs:240000   // stop the loop after 4 min of continuous play (battery/data)
+};
+const TRANSPARENT_PX='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+// IR saturation keying: grey (low-sat, clear/warm) → transparent; coloured cold tops kept
+const IR_SATMIN=0.10, IR_SATFULL=0.45;
+// ECMWF ensemble (ENS, 51 members, 0.25°) for forecast confidence — on-demand, pure ECMWF
+const ENSEMBLE = { model:'ecmwf_ifs025_ensemble', spacing:0.20 };
+// Rain-approach tracker: model precipitation threshold (mm/h) and look-ahead for the trend
+const PR_MIN = 0.1, APPROACH_LOOK = 3;
+// Strong-wind caution (10m gust, m/s). Not a tree-fall prediction — a "bad weather, take care" flag.
+const GUST_STRONG = 11, GUST_SEVERE = 17;   // ≈ 40 / 60 km/h
+// Seed reference locations (from RainLog/WeatherNext family, deduped 114→106). [lat,lon,name,region]
+const SEED_LOCS=[
+[3.77883,101.94133,"Sg. Ruan - Fang Goo 双溪兰 - 晓方","Raub 劳勿"],
+[3.71967,102.01033,"Sg. Klau - Fang Goo 双溪吉流 - 晓方","Raub 劳勿"],
+[3.717,102.0055,"Sg. Klau 1 - CT Tan 双溪吉流 1 - CT Tan","Raub 劳勿"],
+[3.79361,101.93472,"Kg. Sg. Ruan - Neng 双溪兰 - 能","Raub 劳勿"],
+[3.79194,101.94278,"Kg. Sg. Ruan - Jerry Phoon 双溪兰新村 - Jerry","Raub 劳勿"],
+[3.74833,101.95133,"Sg. Klau - Kwong Seng 双溪吉流 - Kwong Seng","Raub 劳勿"],
+[3.74417,101.96917,"Sg. Klau 2 - CT Tan 双溪吉流 2 - CT Tan","Raub 劳勿"],
+[3.7475,101.97694,"Kg. Sg. Klau - Thompson 双溪吉流新村 - Thompso","Raub 劳勿"],
+[3.78392,101.98063,"Kg. Sg. Klau - Soon 双溪吉流新村 - 顺","Raub 劳勿"],
+[3.929,101.921,"Kampung Temau - Eric 甘榜德茂 - Eric","Raub 劳勿"],
+[3.84478,101.95747,"Ulu Gali 乌鲁加里","Raub 劳勿"],
+[3.83333,101.9,"Kg. Gali 甘榜加里","Raub 劳勿"],
+[4.04861,101.92028,"Jerkoh 日利谷","Raub 劳勿"],
+[3.90293,101.81499,"SJKC Cheroh 积罗国民型华文学校","Raub 劳勿"],
+[3.917778,101.919444,"Kampung Temau - MK 甘榜德茂 - MK","Raub 劳勿"],
+[4.090556,101.966111,"Dong - Hong 东区 - 鸿总","Raub 劳勿"],
+[3.834694,101.911833,"Ulu Gali - Jacky Kuan 乌鲁加里 - Jacky Kuan","Raub 劳勿"],
+[3.79275,101.903889,"Raub Batu Tiga - James Lye 劳勿三英里 - James","Raub 劳勿"],
+[4.41453,101.38415,"Ringlet 冷力","Cameron 金马仑"],
+[4.397,101.381,"Bertam Valley 伯坦谷","Cameron 金马仑"],
+[4.44011,101.38921,"Habu 哈布","Cameron 金马仑"],
+[4.47135,101.37565,"Tanah Rata 丹那拉打","Cameron 金马仑"],
+[4.49223,101.38732,"Brinchang 碧兰璋","Cameron 金马仑"],
+[4.50436,101.40734,"Kea Farm 吉亚农场","Cameron 金马仑"],
+[4.51494,101.42771,"Tringkap 丁甲","Cameron 金马仑"],
+[4.56709,101.40968,"Kampung Raja 甘榜拉惹","Cameron 金马仑"],
+[4.58322,101.41243,"Blue Valley 蓝谷","Cameron 金马仑"],
+[4.5225,101.367,"Sungai Palas 双溪巴拉斯","Cameron 金马仑"],
+[4.4305,101.401,"Cameron Valley 金马伦谷","Cameron 金马仑"],
+[4.52,101.37,"Boh Tea Plantation BOH 茶园","Cameron 金马仑"],
+[4.548,101.42,"Kuala Terla Tea Estate 吉拉烈茶园","Cameron 金马仑"],
+[4.458,101.384,"Kampung Taman Sedia 草莓农场","Cameron 金马仑"],
+[4.4619,101.3838,"MARDI Cameron Highlands MARDI 农业站","Cameron 金马仑"],
+[2.81778,101.8925,"Mantin Tmn Permai Jaya 文丁 中华华文小学","NS9 森美兰"],
+[2.82639,101.88028,"Mantin Andalas GIO GIO 文丁 湖滨花园","NS9 森美兰"],
+[2.806111,101.8875,"MANTIN DALAM 文丁达南","NS9 森美兰"],
+[3.12,102.21972,"Spg. Durian (Kg. Mentaus) 1 新邦榴莲 Pitt-猫王","NS9 森美兰"],
+[3.11778,102.21944,"Spg. Durian (Kg. Mentaus) 2 新邦榴莲 SAM","NS9 森美兰"],
+[2.8167,102.0667,"Titi 知知港","NS9 森美兰"],
+[2.42806,103.03639,"Labis - Austin 拉美士 - Austin","Johor 柔佛"],
+[2.527677,102.772178,"Segamat Buloh Kasap 昔加末 巫罗加什","Johor 柔佛"],
+[2.148561,103.052319,"Chaah Baru 三合港","Johor 柔佛"],
+[2.305833,103.091389,"Bekok 彼咯","Johor 柔佛"],
+[2.433331,102.683331,"Jementah 利民达","Johor 柔佛"],
+[2.481236,103.05805,"Tenang Hot Spring 丁能 热水池","Johor 柔佛"],
+[2.38,102.35056,"Machap Baru 马接峇鲁","Melaka 马六甲"],
+[2.3537,102.3161,"Durian Tunggal Dam 榴梿洞葛水坝","Melaka 马六甲"],
+[3.87467,102.34467,"Kg. Simpang Tebing Tinggi 德宾丁宜新村","Jerantut 而连突"],
+[3.949544,102.214385,"Damak 达玛","Jerantut 而连突"],
+[3.91313,102.35476,"Bukit Seladang 友联港神山","Jerantut 而连突"],
+[3.55181,101.8852,"Bentong Kuala Repas 文冬兵营","Bentong 文冬"],
+[3.53333,101.88444,"Bentong Happy Farm 农家乐","Bentong 文冬"],
+[3.67438,101.8655,"Bentong Valley Agro Park 文冬山寨谷小舍","Bentong 文冬"],
+[3.52816,101.915014,"Bentong Utara 文冬市北","Bentong 文冬"],
+[3.530986,101.910808,"Bentong Bukit D.O 文冬老虎山","Bentong 文冬"],
+[3.516833,101.897667,"Bentong Selatan 文冬市南","Bentong 文冬"],
+[3.44917,101.90056,"Waterway Villa 水道别墅","Bentong 文冬"],
+[3.50783,101.92667,"Kg. Benus 甘榜本努斯","Bentong 文冬"],
+[3.73622,101.80792,"Tras 都赖","Bentong 文冬"],
+[3.57278,101.92611,"Kampung Hulu Lebu 乌鲁乐布新村","Bentong 文冬"],
+[3.616,101.933,"Kampung Lebu 甘榜乐布","Bentong 文冬"],
+[3.8542814,101.9430543,"Sungai Ruan 双溪兰","Bentong Team 团队"],
+[3.492,102.024,"Borneo Spring 婆罗青泉","Karak 加叻"],
+[3.45972,102,"Kg. Sungai Dua 甘榜双溪都亚","Karak 加叻"],
+[3.453,102.031,"Kg. Cinta Manis 甘甜新村","Karak 加叻"],
+[3.41194,102.07889,"Kg. Troh 德乐新村","Karak 加叻"],
+[3.38389,102.02778,"The Valley 加叻幽谷","Karak 加叻"],
+[3.45227,101.99607,"100% ORGANIC DURI RIN 山本绫有机农场","Karak 加叻"],
+[3.205,102.164,"Manchis 文积","Manchis 文积"],
+[3.229722,102.156111,"Kg. Ponson - Gan Ming Keong 彭顺村 - 颜明强","Manchis 文积"],
+[3.240556,102.141111,"Batu 36 三十六碑","Manchis 文积"],
+[4.256043,101.227729,"Chenderiang 积莪营","Perak 霹雳"],
+[3.978889,101.360278,"Sungkai 宋溪","Perak 霹雳"],
+[3.7755,101.52567,"Diamond Creeks 钻石溪","Perak 霹雳"],
+[3.71778,101.55278,"Tanjung Malim 丹绒马林","Perak 霹雳"],
+[3.436161,102.294602,"Kampung Belengu 甘榜柏伦古","Pahang Central 彭亨中部"],
+[3.54,102.36778,"Kampung Ketam 甘榜吉胆","Pahang Central 彭亨中部"],
+[3.505847,102.360318,"Kampung Gantok 甘榜甘督","Pahang Central 彭亨中部"],
+[3.467919,102.094837,"Jambu Rias BIGWOOD 占布里亚斯 大木","Pahang Central 彭亨中部"],
+[4.7443608,101.6416756,"Lojing 罗京高原","Kelantan 吉兰丹"],
+[5.456499,102.3308,"Kuala Krai 瓜拉吉赖","Kelantan 吉兰丹"],
+[4.884279,101.968178,"Gua Musang 话望生","Kelantan 吉兰丹"],
+[2.430879,111.947151,"Lubok Palaei 鲁柏巴莱","Sabah/Sarawak 东马"],
+[2.33837,112.08403,"Sibintek 西宾德","Sabah/Sarawak 东马"],
+[5.35528,116.14472,"Keningau 根地咬","Sabah/Sarawak 东马"],
+[5.99417,116.18222,"Kionsom 建山","Sabah/Sarawak 东马"],
+[3.32,102.43,"Mengkarak 明加叻","Bera 百乐县"],
+[3.297,102.395,"Kemasul 金马苏","Bera 百乐县"],
+[3.248,102.417,"Triang 直凉","Bera 百乐县"],
+[3.2305389,102.3951267,"Palm Glove 直凉园 金河山庄","Bera 百乐县"],
+[3.18194,102.43667,"Paya Lang 巴也郎","Bera 百乐县"],
+[3.165721,102.386012,"Simpang Bukit Mendi 明光","Bera 百乐县"],
+[3.17474,102.350563,"Bukit Mendi 武吉文迪","Bera 百乐县"],
+[3.124265,102.363199,"Kemayan Taman Maju Jaya 金马扬 1","Bera 百乐县"],
+[3.141841,102.363953,"Kemayan Taman Ixnora Jaya 金马扬 2","Bera 百乐县"],
+[3.09639,102.35861,"Sungai Rui 双溪锐","Bera 百乐县"],
+[3.42925,102.13928,"Lanchang (Durian) 联增","Miketam 苏晓薇"],
+[3.40339,102.283,"Draha (Durian) 德拉哈","Miketam 苏晓薇"],
+[3.39956,102.14848,"Jambu Rias 占布里亚斯","Miketam 苏晓薇"],
+[3.36379,102.2608,"Empresa 皇后园","Miketam 苏晓薇"],
+[3.37169,102.31093,"Mentakab 文德甲","Miketam 苏晓薇"],
+[3.32936,102.31455,"Mengkarak 明加叻","Miketam 苏晓薇"],
+[4.124748,102.088034,"Kuala Lipis 瓜拉立卑","Miketam 苏晓薇"],
+[5.1775,102.895,"Kampung Chapu 甘榜查布","Desmond 陈联铕"],
+[5.1725,102.53333,"Kuala Berang 瓜拉伯浪","Desmond 陈联铕"],
+[3.85,103.03333,"Sungai Lembing 林明","Uncle Soon 順豪"]
+];
+
+// Overlay cell opacity floor/ceiling — raise for a clearer read on the dark basemap
+const CELL_ALPHA = { min:0.34, max:0.78 };
+// Storm-ingredient thresholds (tropical Malaysia, indicative)
+const ING = {
+  rhOn:70, rhStrong:85,        // 925 hPa moisture, %
+  capeOn:500, capeStrong:2000  // instability, J/kg
+};
+
+// Default view coordinate (no named seeds — user sets via GPS or manual entry)
+const DEFAULT_CENTER = { lat:3.155, lon:102.400 };
+
+/* ================= I18N ================= */
+const I18N = {
+  zh:{
+    title:"风的累积", sub:"WIND ACCUMULATION · CONVERGENCE MONITOR",
+    tag:"925 hPa 边界层风辐合 · MFC · ECMWF IFS 0.25°",
+    geo:"当前位置", go:"查看", phLat:"纬度 3.155", phLon:"经度 102.400", refresh:"更新", wind:"925 风", rh:"MFC g/kg·h", pr:"上升* cm/s",
+    tl:"48h 辐合 · 点击或拖动", share:"分享到 WhatsApp",
+    shareTitle:"分享到 WhatsApp", shareNote:"可编辑后发送 · 供每日晨间广播使用", send:"发送", cancel:"取消",
+    expH:"什么是风的累积？",
+    langNext:"EN",
+    cats:{ diverge:"扩散 / 下沉", calm:"平静", weak:"弱累积", mod:"中度累积", strong:"强烈累积 ⚠" },
+    ing:{ lift:"抬升 LIFT", moist:"水汽 MOIST", inst:"不稳定 CAPE" },
+    ingShort:{ lift:"抬升", moist:"水汽", inst:"不稳定", short:"不足" },
+    bands:{ weak:"弱", mod:"中", strong:"强", dry:"发散", sink:"下沉" },
+    depth:{ deep:"深层辐合", shallow:"浅层" },
+    surge:"季风涌", upslope:"迎风坡抬升",
+    conf:{ overall:"环境信心", members:"成员支持", lift:"抬升", moist:"水汽", inst:"不稳定",
+      note:"ECMWF 集合最多 51 成员 (0.25°) 对水汽＋不稳定环境的一致度 · 高＝各成员大多认同大气已就绪。触发（抬升）见上方确定性预报。仅供参考。" },
+    appr:{ title:"降雨来临", here:"模式预报你现在的位置会下雨", reaching:"预计降雨到达 约", onoff:"模式：间歇阵雨至 约", cont:"模式：持续雨至 约", hAbbr:"小时后",
+      nearest:"最近降雨", approach:"正在靠近 ↓", recede:"正在远离 ↑", steady:"距离稳定",
+      notReach:"预计不会到达你的位置。", none:"你的范围内暂无降雨。",
+      note:`基于 ECMWF 模式降水预报（${SURF_RES}，指示性）· 观测请配合卫星红外与实地观察。` },
+    locs:{ favs:"收藏", saved:"已存", trash:"回收站", other:"其他", none:"没有符合的地点", empty:"清空回收站", exists:"已在收藏", nameQ:"地点名称：", trashed:"已移到回收站", purgeQ:"永久删除回收站所有项目？", purge1Q:"永久删除此地点？" },
+    rlev:{ light:"小雨", mod:"中雨", heavy:"大雨", torr:"暴雨" },
+    windwarn:{ strong:"强风", severe:"大风", actStrong:"户外请小心", actSevere:"避免外出，勿出海" },
+    verdict:{
+      likely:"风暴可能性高",
+      watch:"留意风暴",
+      partial:"风暴机会低",
+      upliftOnly:"只有抬升 — 风暴风险低",
+      diverge:"空气扩散下沉 — 抑制",
+      calm:"平静 — 无明显累积"
+    },
+    note:{ all:"要素齐备", present:"要素到位", weakLift:"抬升偏弱", mod:"强度中等", sep:"，" },
+    exp1:"马来西亚气象局常说「小心风的累积」，但很少说明。它指的是<b>低层风辐合</b>——不同方向的风汇聚在一起，空气被挤压，无处可去只能上升。",
+    exp2:"上升的湿空气冷却、凝结，形成积雨云，带来<b>雷暴、骤雨和骤发水灾</b>。但辐合只是<b>触发</b>——还需要<b>水汽</b>（湿度）和<b>不稳定</b>（CAPE 对流有效位能）。缺一不可，风暴才会真正形成。本工具会门控警报：只有当大气能把抬升转化为风暴时才「喊」。",
+    exp3:"本工具用 <b>925 hPa 边界层风</b>（非 10 米地面风）计算辐合：<code>累积 = −(∂u/∂x + ∂v/∂y)</code>。并计算 <b>水汽通量辐合 MFC = −∇·(qV)</b>（水汽＋辐合的对流触发指标），以及由辐合按质量连续推算的<b>上升速度*</b>（w ≈ 辐合 × 边界层厚度）。数据来自 <b>ECMWF IFS</b>（风/温/湿 0.25°；CAPE 与降水取自更精细的 HRES 9km）；此模式在 Open-Meteo 不提供气压层垂直速度，故上升为推算值（标 *）。同时比较 <b>925 与 850 hPa</b> 辐合：两层皆辐合＝<b>深层辐合</b>（信号更可靠）；仅 925＝浅层。850 hPa 强劲东北风则标示 <b>季风涌</b>（东北季风期强降雨/水灾前兆）。此外结合地形（Copernicus DEM 90m）计算 <b>地形抬升 w≈V·∇z</b>：风吹向高地即迎风坡强迫抬升，与辐合叠加时风暴更易发生。<b>卫星红外</b>（Himawari-9 B13）动画显示云顶温度：越冷＝云越高＝对流越深；逐帧变冷＝风暴正在增强（约延迟 40 分钟）。",
+    warn:"⚠ 数据诚实声明：本工具使用 10 米地面风的粗网格估算，是<b>指示性</b>参考，非气象局的中尺度分析。请始终以官方警报为准。数值为量级估计，非精确诊断。",
+    now:"现在", loading:"读取风场中…", offline:"离线 — 显示上次缓存", failed:"读取失败，请检查网络",
+    tapmove:"点击地图可移动中心点", shared:"已复制分享文字",
+    waHead:"🌬️ 风的累积监测", waConv:"925 辐合", waCat:"等级", waWind:"925 风", waLoc:"地点", waTime:"时间",
+    waMfc:"水汽通量辐合", waAsc:"上升*",
+    waTip:"（925 hPa 边界层辐合 · MFC＝水汽通量辐合 · 上升*由辐合推算。ECMWF IFS 0.25° · Open-Meteo。仅供参考，以气象局警报为准。）",
+    morn:{
+      btn:"早报", title:"早报文字 · 今日风暴", copy:"复制", copied:"已复制",
+      note:"可编辑后复制或分享 · 供每日晨间广播使用",
+      head:"风的累积高峰", likely:"要素齐备，风暴可能性高 ⚠", watch:"要素在汇集，留意雷暴",
+      foot:"其余时段风险较低。仅供参考，以气象局警报为准。",
+      lowrisk:"风的累积不明显，今日风暴风险低。",
+      upliftOnly:"白天有风的累积，但缺水汽/不稳定，风暴风险低。",
+      nodata:"暂无白天时段数据。"
+    }
+  },
+  en:{
+    title:"Wind Accumulation", sub:"低层风辐合监测 · CONVERGENCE MONITOR",
+    tag:"925 hPa boundary-layer convergence · MFC · ECMWF IFS 0.25°",
+    geo:"Current location", go:"Go", phLat:"Latitude 3.155", phLon:"Longitude 102.400", refresh:"Refresh", wind:"925 wind", rh:"MFC g/kg·h", pr:"ascent* cm/s",
+    tl:"48h outlook · tap or drag", share:"Share to WhatsApp",
+    shareTitle:"Share to WhatsApp", shareNote:"Edit, then send · for your daily morning broadcast", send:"Send", cancel:"Cancel",
+    expH:"What is wind accumulation?",
+    langNext:"中",
+    cats:{ diverge:"Diverging / sinking", calm:"Calm", weak:"Weak build-up", mod:"Moderate build-up", strong:"Strong build-up ⚠" },
+    ing:{ lift:"LIFT", moist:"MOISTURE", inst:"INSTABILITY" },
+    ingShort:{ lift:"lift", moist:"moisture", inst:"instability", short:"missing" },
+    bands:{ weak:"weak", mod:"mod", strong:"strong", dry:"drying", sink:"sinking" },
+    depth:{ deep:"deep convergence", shallow:"shallow" },
+    surge:"Monsoon surge", upslope:"Upslope lift",
+    conf:{ overall:"Environment confidence", members:"members favour", lift:"Lift", moist:"Moisture", inst:"Instability",
+      note:"Agreement across ECMWF ensemble (up to 51 members, 0.25°) on a moist + unstable environment · high = members mostly concur the atmosphere is primed. The trigger (lift) is the deterministic forecast above. Indicative." },
+    appr:{ title:"Rain approach", here:"Model expects rain at your location", reaching:"Rain reaching you ~", onoff:"Model: on/off showers till ~", cont:"Model: steady rain till ~", hAbbr:"h",
+      nearest:"Nearest rain", approach:"approaching ↓", recede:"moving away ↑", steady:"holding distance",
+      notReach:"Not forecast to reach your point.", none:"No rain in your area right now.",
+      note:`Based on ECMWF model precipitation (${SURF_RES}, indicative) · pair with the IR satellite + your own eyes for what's actually happening.` },
+    locs:{ favs:"Favourites", saved:"Saved", trash:"Trash", other:"Other", none:"No matching locations", empty:"Empty trash", exists:"Already a favourite", nameQ:"Location name:", trashed:"Moved to trash", purgeQ:"Permanently delete all trashed items?", purge1Q:"Permanently delete this location?" },
+    rlev:{ light:"light", mod:"moderate", heavy:"heavy", torr:"torrential" },
+    windwarn:{ strong:"Strong winds", severe:"Damaging winds", actStrong:"take care outdoors", actSevere:"avoid going out · stay off the water" },
+    verdict:{
+      likely:"Storm likely",
+      watch:"Storm watch",
+      partial:"Low storm chance",
+      upliftOnly:"Uplift only — low storm risk",
+      diverge:"Air spreading & sinking — suppressed",
+      calm:"Calm — no real build-up"
+    },
+    note:{ all:"all present", present:"all present", weakLift:"lift still weak", mod:"moderate strength", sep:", " },
+    exp1:"MetMalaysia often warns to \"beware of wind accumulation\" but rarely explains it. It means <b>low-level wind convergence</b> — winds from different directions meeting, so air piles up and has nowhere to go but up.",
+    exp2:"That rising moist air cools, condenses and builds cumulonimbus, bringing <b>thunderstorms, downpours and flash floods</b>. But convergence is only the <b>trigger</b> — a storm also needs <b>moisture</b> (humidity) and <b>instability</b> (CAPE). Only when all three line up does it actually fire. This tool gates the alert: it stays quiet unless the atmosphere can convert the uplift into a storm.",
+    exp3:"This tool uses <b>925 hPa boundary-layer wind</b> (not 10 m surface wind) for convergence: <code>accumulation = −(∂u/∂x + ∂v/∂y)</code>. It also computes <b>moisture-flux convergence MFC = −∇·(qV)</b> (the moisture+convergence initiation index) and a <b>continuity-derived ascent*</b> (w ≈ convergence × boundary-layer depth). Data is <b>ECMWF IFS</b> (winds/T/RH at 0.25°; CAPE and precipitation from the finer HRES 9 km); that model doesn't expose pressure-level vertical velocity on Open-Meteo, so ascent is derived (marked *). It also compares <b>925 vs 850 hPa</b> convergence: converging at both = <b>deep convergence</b> (a more reliable signal); 925-only = shallow. Strong NE 850 hPa flow flags a <b>monsoon surge</b> (a heavy-rain/flood precursor in the NE monsoon). It also uses terrain (Copernicus DEM 90 m) to compute <b>orographic lift w≈V·∇z</b>: wind blowing toward higher ground is forced upslope, and combined with convergence makes storms more likely. The <b>IR satellite</b> loop (Himawari-9 B13) shows cloud-top temperature: colder = taller cloud = deeper convection; tops cooling frame-to-frame = a storm actively deepening (~40 min delayed).",
+    warn:"⚠ Data-honesty note: this uses a coarse grid of 10 m surface wind and is an <b>indicative</b> estimate, not MetMalaysia's mesoscale analysis. Always defer to official warnings. Values are order-of-magnitude, not exact diagnostics.",
+    now:"now", loading:"Reading wind field…", offline:"Offline — showing last cached", failed:"Fetch failed, check connection",
+    tapmove:"Tap the map to move the centre point", shared:"Share text copied",
+    waHead:"🌬️ Wind Accumulation Monitor", waConv:"925 Conv", waCat:"Level", waWind:"925 wind", waLoc:"Place", waTime:"Time",
+    waMfc:"Moisture-flux conv", waAsc:"Ascent*",
+    waTip:"(925 hPa boundary-layer convergence · MFC = moisture-flux convergence · ascent* derived from convergence. ECMWF IFS 0.25° · Open-Meteo. Indicative only; defer to MetMalaysia warnings.)",
+    morn:{
+      btn:"Morning", title:"Morning line · today's storms", copy:"Copy", copied:"Copied",
+      note:"Edit, then copy or share · for your daily morning broadcast",
+      head:"Wind accumulation peaks", likely:"all 3 ingredients — storm likely ⚠", watch:"ingredients gathering, watch for storms",
+      foot:"Lower risk at other times. Indicative only; defer to MetMalaysia warnings.",
+      lowrisk:"little wind accumulation, low storm risk today.",
+      upliftOnly:"some wind accumulation in daytime, but dry/stable — low storm risk.",
+      nodata:"No daytime data available."
+    }
+  }
+};
+let lang = localStorage.getItem("wa_lang") || "zh";
+
+/* ================= STATE ================= */
+let map, arrowLayer, cellLayer, centerPin;
+let center = loadCenter();
+let data = null;         // { time[], grid:[{lat,lon,speed[],dir[],rh[],pr[]}], hours }
+let hourIdx = 0;
+let baseTimeLabel = "";
+let overlayMode = "combo";   // 'combo' | 'cvg' | 'mfc' | 'cape'
+
+function loadCenter(){
+  try{ const c=JSON.parse(localStorage.getItem("wa_center")); if(c&&isFinite(c.lat)&&isFinite(c.lon)) return {lat:c.lat, lon:c.lon, name:null}; }catch(e){}
+  return { lat:DEFAULT_CENTER.lat, lon:DEFAULT_CENTER.lon, name:null };
+}
+function saveCenter(){ try{ localStorage.setItem("wa_center", JSON.stringify({lat:center.lat, lon:center.lon})); }catch(e){} }
+function syncFields(){
+  document.getElementById('inLat').value = center.lat;
+  document.getElementById('inLon').value = center.lon;
+}
+
+/* ================= LOCATIONS (seeds + favourites, full lifecycle) ================= */
+/* fav record: {id, name, lat, lon, fav:bool, deleted:bool, seed:bool, updatedAt} */
+let favs=(()=>{ try{return JSON.parse(localStorage.getItem('wa_favs'))||[]}catch(e){return[]} })();
+const TRASH_PURGE_DAYS=30;
+(function migrateAndPurge(){
+  let changed=false; const cutoff=Date.now()-TRASH_PURGE_DAYS*86400000;
+  favs.forEach(f=>{ if(f.id===undefined){f.id=newId();changed=true;} if(f.fav===undefined){f.fav=true;changed=true;}
+    if(f.deleted===undefined){f.deleted=false;changed=true;} if(f.seed===undefined){f.seed=false;changed=true;}
+    if(f.updatedAt===undefined){f.updatedAt=Date.now();changed=true;} });
+  const before=favs.length; favs=favs.filter(f=>!(f.deleted && (f.updatedAt||0)<cutoff));
+  if(changed||favs.length!==before) saveFavs();
+})();
+function newId(){ return 'f'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function saveFavs(){ try{ localStorage.setItem('wa_favs', JSON.stringify(favs)); }catch(e){} }
+function coordKey(lat,lon){ return (+lat).toFixed(3)+','+(+lon).toFixed(3); }
+function recAt(lat,lon){ const k=coordKey(lat,lon); return favs.find(f=>coordKey(f.lat,f.lon)===k); }
+function activeFavAt(lat,lon){ const f=recAt(lat,lon); return (f && !f.deleted && f.fav)?f:null; }
+function toast(msg){ let t=document.getElementById('wtoast'); if(!t){t=document.createElement('div');t.id='wtoast';document.body.appendChild(t);} t.textContent=msg; t.className='show'; clearTimeout(toast._t); toast._t=setTimeout(()=>t.className='',1800); }
+
+let seedLayer=null, showSeeds=(localStorage.getItem('wa_showseeds')!=='0');
+function seedIcon(){ return L.divIcon({className:'seedmark', html:'★', iconSize:[22,22], iconAnchor:[11,11]}); }
+function favIcon(){ return L.divIcon({className:'favmark', html:'★', iconSize:[26,26], iconAnchor:[13,13]}); }
+function drawSeeds(){
+  if(!map) return;
+  if(!seedLayer){ seedLayer=L.layerGroup().addTo(map); }
+  seedLayer.clearLayers();
+  if(!showSeeds) return;
+  SEED_LOCS.forEach(([lat,lon,name])=>{
+    if(activeFavAt(lat,lon)) return;                 // shown as gold favourite instead
+    L.marker([lat,lon],{icon:seedIcon(),keyboard:false,title:name})
+      .on('click',()=>jumpTo(lat,lon,name)).addTo(seedLayer);
+  });
+  favs.filter(f=>f.fav && !f.deleted).forEach(f=>{
+    L.marker([f.lat,f.lon],{icon:favIcon(),keyboard:false,title:f.name})
+      .on('click',()=>jumpTo(f.lat,f.lon,f.name)).addTo(seedLayer);
+  });
+}
+function toggleSeeds(){
+  showSeeds=!showSeeds; localStorage.setItem('wa_showseeds', showSeeds?'1':'0');
+  document.getElementById('seedBtn').classList.toggle('on', showSeeds);
+  drawSeeds();
+}
+function jumpTo(lat,lon,name){
+  center={lat:+(+lat).toFixed(4), lon:+(+lon).toFixed(4), name: name?{zh:name,en:name}:null};
+  if(centerPin) centerPin.setLatLng([center.lat,center.lon]);
+  syncFields(); saveCenter(); fitGrid();
+  closeLocs();
+  loadData();
+}
+function afterMut(){ saveFavs(); drawSeeds(); renderLocs(); updateFocusFav(); }
+/* one-tap favourite for the location currently in focus */
+function updateFocusFav(){
+  const btn=document.getElementById('focusFav'); if(!btn) return;
+  const on=!!activeFavAt(center.lat, center.lon);
+  btn.textContent = on ? '★' : '☆';
+  btn.classList.toggle('on', on);
+  btn.title = on ? (lang==='zh'?'取消收藏':'Unfavourite') : (lang==='zh'?'设为我的农场':'Make this my farm');
+}
+function toggleFocusFav(){
+  const ex=recAt(center.lat, center.lon);
+  if(ex && !ex.deleted && ex.fav){                 // already a favourite → remove/unmark
+    if(ex.seed) unstarRec(ex.id); else toggleFavFlag(ex.id);
+    toast(lang==='zh'?'已取消收藏':'Removed from favourites');
+    return;
+  }
+  const seed=SEED_LOCS.find(([lat,lon])=>coordKey(lat,lon)===coordKey(center.lat,center.lon));
+  const name = seed ? seed[2] : (center.name?(lang==='zh'?center.name.zh:center.name.en):`${center.lat.toFixed(3)}, ${center.lon.toFixed(3)}`);
+  if(ex){ ex.name=ex.name||name; ex.fav=true; ex.deleted=false; ex.updatedAt=Date.now(); }
+  else favs.unshift({id:newId(),name,lat:+center.lat,lon:+center.lon,fav:true,deleted:false,seed:!!seed,updatedAt:Date.now()});
+  afterMut();
+  toast(lang==='zh'?'已设为我的农场 ★':'Saved as your farm ★');
+}
+/* ADD current spot */
+function saveFav(){
+  const ex=recAt(center.lat,center.lon);
+  if(ex && !ex.deleted){ ex.fav=true; ex.updatedAt=Date.now(); afterMut(); toast(I18N[lang].locs.exists); return; }
+  const dflt=center.name?(lang==='zh'?center.name.zh:center.name.en):`${center.lat.toFixed(3)}, ${center.lon.toFixed(3)}`;
+  const nm=prompt(I18N[lang].locs.nameQ, dflt); if(nm===null) return;
+  const name=(nm||'').trim() || `${center.lat.toFixed(3)}, ${center.lon.toFixed(3)}`;
+  if(ex){ ex.name=name; ex.fav=true; ex.deleted=false; ex.updatedAt=Date.now(); }
+  else favs.unshift({id:newId(),name,lat:+center.lat,lon:+center.lon,fav:true,deleted:false,seed:false,updatedAt:Date.now()});
+  afterMut();
+}
+/* STAR / UNSTAR a seed */
+function starSeed(lat,lon,name){
+  const ex=recAt(lat,lon);
+  if(ex){ ex.fav=true; ex.deleted=false; ex.updatedAt=Date.now(); }
+  else favs.unshift({id:newId(),name,lat:+lat,lon:+lon,fav:true,deleted:false,seed:true,updatedAt:Date.now()});
+  afterMut();
+}
+function unstarSeed(lat,lon){ const f=recAt(lat,lon); if(f){ favs=favs.filter(x=>x!==f); afterMut(); } }
+function unstarRec(id){ favs=favs.filter(x=>x.id!==id); afterMut(); }   // seed favourite → revert to plain seed
+/* MARK / UNMARK favourite (manual records: favourite ↔ saved, kept either way) */
+function toggleFavFlag(id){ const f=favs.find(x=>x.id===id); if(!f)return; f.fav=!f.fav; f.updatedAt=Date.now(); afterMut(); }
+/* RENAME */
+function renameFav(id){ const f=favs.find(x=>x.id===id); if(!f)return; const nm=prompt(I18N[lang].locs.nameQ, f.name); if(nm===null)return; f.name=(nm||'').trim()||f.name; f.updatedAt=Date.now(); afterMut(); }
+/* SOFT DELETE / RESTORE / PURGE (manual records only) */
+function softDelete(id){ const f=favs.find(x=>x.id===id); if(!f)return; f.deleted=true; f.updatedAt=Date.now(); afterMut(); toast(I18N[lang].locs.trashed); }
+function restoreFav(id){ const f=favs.find(x=>x.id===id); if(!f)return; f.deleted=false; f.updatedAt=Date.now(); afterMut(); }
+function purgeFav(id){ if(!confirm(I18N[lang].locs.purge1Q))return; favs=favs.filter(x=>x.id!==id); afterMut(); }
+function emptyTrash(){ if(!favs.some(f=>f.deleted))return; if(!confirm(I18N[lang].locs.purgeQ))return; favs=favs.filter(f=>!f.deleted); afterMut(); }
+
+function openLocs(){ renderLocs(); document.getElementById('locSheet').classList.add('on'); }
+function closeLocs(){ const s=document.getElementById('locSheet'); if(s) s.classList.remove('on'); }
+let expandedRegions=new Set();
+function toggleRegion(r){ if(expandedRegions.has(r)) expandedRegions.delete(r); else expandedRegions.add(r); renderLocs(); }
+function jarg(name){ return JSON.stringify(name).replace(/"/g,'&quot;'); }
+function renderLocs(){
+  const L18=I18N[lang].locs, q=(document.getElementById('locSearch').value||'').trim().toLowerCase();
+  const filtering=q.length>0, body=document.getElementById('locBody');
+  const match=n=>!q||n.toLowerCase().includes(q);
+  let html='';
+  const rowUser=(f)=>{
+    const starAct = f.seed ? `unstarRec('${f.id}')` : `toggleFavFlag('${f.id}')`;
+    const del = f.seed ? '' : `<button class="locdel" onclick="softDelete('${f.id}')" title="delete">✕</button>`;
+    return `<div class="locrow">
+      <button class="locstar ${f.fav?'on':''}" onclick="${starAct}" title="fav">${f.fav?'★':'☆'}</button>
+      <button class="locjump" onclick="jumpTo(${f.lat},${f.lon},${jarg(f.name)})">${esc(f.name)}<span class="loccoord">${(+f.lat).toFixed(3)}, ${(+f.lon).toFixed(3)}</span></button>
+      <button class="locedit" onclick="renameFav('${f.id}')" title="rename">✏️</button>${del}</div>`;
+  };
+  // ★ Favourites (active, fav)
+  const favList=favs.filter(f=>!f.deleted && f.fav && match(f.name));
+  if(favList.length){ html+=`<div class="locgrouph static">★ ${L18.favs} <span class="locn">${favList.length}</span></div>`; favList.forEach(f=>html+=rowUser(f)); }
+  // Saved (active, not fav)
+  const savedList=favs.filter(f=>!f.deleted && !f.fav && match(f.name));
+  if(savedList.length){ html+=`<div class="locgrouph static">${L18.saved} <span class="locn">${savedList.length}</span></div>`; savedList.forEach(f=>html+=rowUser(f)); }
+  // Seeds grouped by region — collapsible, each with star toggle
+  const groups=new Map();
+  SEED_LOCS.forEach(([lat,lon,name,region])=>{
+    if(q && !name.toLowerCase().includes(q) && !(region||'').toLowerCase().includes(q)) return;
+    const g=region||L18.other; if(!groups.has(g)) groups.set(g,[]); groups.get(g).push([lat,lon,name]);
+  });
+  for(const [region,items] of groups){
+    const open = filtering || expandedRegions.has(region);
+    html+=`<div class="locgrouph" data-region="${esc(region)}" onclick="toggleRegion(this.dataset.region)">
+      <span class="lgcaret">${open?'▾':'▸'}</span><span class="lgname">${esc(region)}</span><span class="locn">${items.length}</span></div>`;
+    if(open) items.forEach(([lat,lon,name])=>{ const starred=!!activeFavAt(lat,lon);
+      html+=`<div class="locrow">
+        <button class="locstar ${starred?'on':''}" onclick="${starred?`unstarSeed(${lat},${lon})`:`starSeed(${lat},${lon},${jarg(name)})`}" title="fav">${starred?'★':'☆'}</button>
+        <button class="locjump" onclick="jumpTo(${lat},${lon},${jarg(name)})">${esc(name)}<span class="loccoord">${(+lat).toFixed(3)}, ${(+lon).toFixed(3)}</span></button></div>`; });
+  }
+  // 🗑 Trash (deleted)
+  const trash=favs.filter(f=>f.deleted && match(f.name));
+  if(trash.length){
+    const topen = filtering || expandedRegions.has('__trash');
+    html+=`<div class="locgrouph" data-region="__trash" onclick="toggleRegion(this.dataset.region)">
+      <span class="lgcaret">${topen?'▾':'▸'}</span><span class="lgname">🗑 ${L18.trash}</span><span class="locn">${trash.length}</span></div>`;
+    if(topen){
+      trash.forEach(f=>{ html+=`<div class="locrow trash">
+        <button class="locjump dim" onclick="jumpTo(${f.lat},${f.lon},${jarg(f.name)})">${esc(f.name)}<span class="loccoord">${(+f.lat).toFixed(3)}, ${(+f.lon).toFixed(3)}</span></button>
+        <button class="locrestore" onclick="restoreFav('${f.id}')" title="restore">↩</button>
+        <button class="locdel" onclick="purgeFav('${f.id}')" title="purge">✕</button></div>`; });
+      html+=`<button class="locpurge" onclick="emptyTrash()">${L18.empty}</button>`;
+    }
+  }
+  if(!html) html=`<div class="locempty">${L18.none}</div>`;
+  body.innerHTML=html;
+}
+function esc(s){return(s+'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
+
+
+/* ================= INIT ================= */
+function gridBounds(){
+  const d = ((GRID_N-1)/2)*SPACING;
+  return [[center.lat-d, center.lon-d],[center.lat+d, center.lon+d]];
+}
+function fitGrid(){ if(map) map.fitBounds(gridBounds(), {padding:[24,24], animate:false}); }
+
+function initMap(){
+  map = L.map('map',{zoomControl:true, attributionControl:false}).setView([center.lat,center.lon], 9);
+  map.zoomControl.setPosition('topleft');
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+    maxZoom:16, subdomains:'abcd'
+  }).addTo(map);
+  cellLayer = L.layerGroup().addTo(map);
+  arrowLayer = L.layerGroup().addTo(map);
+  centerPin = L.marker([center.lat,center.lon],{
+    icon:L.divIcon({className:'focuspin', iconSize:[30,40], iconAnchor:[15,38],
+      html:'<svg width="30" height="40" viewBox="0 0 30 40" xmlns="http://www.w3.org/2000/svg">'
+        +'<path d="M15 39 C15 39 27 22 27 13 A12 12 0 1 0 3 13 C3 22 15 39 15 39 Z" '
+        +'fill="#2b7fff" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round"/>'
+        +'<circle cx="15" cy="13" r="4.4" fill="#ffffff"/></svg>'}),
+    interactive:false, keyboard:false, zIndexOffset:1000
+  }).addTo(map);
+  fitGrid();
+  map.on('click', e=>{
+    center.lat = +e.latlng.lat.toFixed(4); center.lon = +e.latlng.lng.toFixed(4);
+    center.name = null; centerPin.setLatLng([center.lat,center.lon]);
+    syncFields(); saveCenter(); fitGrid();
+    gpsInfo((lang==='zh'?"已选定 · ":"Selected · ")+center.lat+", "+center.lon);
+    loadData();
+  });
+  drawSeeds();
+}
+
+/* ================= DATA ================= */
+function gridCoords(){
+  // row 0 = northernmost; col 0 = westernmost
+  const lats=[], lons=[], pts=[];
+  const half=(GRID_N-1)/2;
+  for(let i=0;i<GRID_N;i++){
+    const la = +(center.lat + (half - i)*SPACING).toFixed(4);
+    for(let j=0;j<GRID_N;j++){
+      const lo = +(center.lon + (j - half)*SPACING).toFixed(4);
+      lats.push(la); lons.push(lo); pts.push({i,j,lat:la,lon:lo});
+    }
+  }
+  return {lats,lons,pts};
+}
+
+let inflight = null;
+let elevCache = { sig:null, elev:null };
+async function fetchElevation(lats, lons, signal){
+  const sig = lats.join(',')+'|'+lons.join(',');
+  if(elevCache.sig===sig && elevCache.elev) return elevCache.elev;
+  const CH=100; const out=[];   // elevation API caps coordinates per request
+  for(let s=0;s<lats.length;s+=CH){
+    const la=lats.slice(s,s+CH), lo=lons.slice(s,s+CH);
+    const url=`https://api.open-meteo.com/v1/elevation?latitude=${la.join(',')}&longitude=${lo.join(',')}`;
+    const res=await fetch(url, {signal});
+    if(!res.ok) throw new Error("elev HTTP "+res.status);
+    const j=await res.json();
+    const e=j.elevation || [];
+    for(const v of e) out.push(v);
+  }
+  if(out.length===lats.length){ elevCache={sig, elev:out}; return out; }
+  throw new Error("elev length mismatch "+out.length+"/"+lats.length);
+}
+async function loadData(){
+  if(inflight){ try{ inflight.abort(); }catch(e){} }
+  const ac = new AbortController(); inflight = ac;
+  setStatus(true, I18N[lang].loading);
+  document.getElementById('refreshBtn').disabled = true;
+  const {lats,lons,pts} = gridCoords();
+  // Winds/T/RH need pressure levels → IFS 0.25°. CAPE/precip are surface → sharper on IFS HRES 9km.
+  // /v1/ecmwf serves best-per-variable automatically (9km surface + 0.25° upper-air).
+  const vars = `wind_speed_925hPa,wind_direction_925hPa,wind_speed_850hPa,wind_direction_850hPa,`
+    + `temperature_925hPa,relative_humidity_925hPa,cape,precipitation,wind_gusts_10m`;
+  const url = CAPE_HIRES
+    ? `https://api.open-meteo.com/v1/ecmwf?latitude=${lats.join(',')}&longitude=${lons.join(',')}`
+      + `&hourly=${vars}&wind_speed_unit=ms&timezone=auto`
+    : `https://api.open-meteo.com/v1/forecast?latitude=${lats.join(',')}&longitude=${lons.join(',')}`
+      + `&hourly=${vars}&models=ecmwf_ifs025&forecast_days=3&wind_speed_unit=ms&timezone=auto`;
+  try{
+    const res = await fetch(url, {signal:ac.signal});
+    if(!res.ok) throw new Error("HTTP "+res.status);
+    const json = await res.json();
+    const arr = Array.isArray(json) ? json : [json];   // multi-point returns array
+    // Window: start 2h before now so it lines up with the ~40-min-delayed IR loop; 48 hourly slots
+    const full = arr[0].hourly.time;
+    const target = Date.now() - 2*3600*1000;
+    let startIdx=0, bd=1e18;
+    full.forEach((t,i)=>{ const d=Math.abs(new Date(t).getTime()-target); if(d<bd){bd=d;startIdx=i;} });
+    startIdx = Math.max(0, Math.min(startIdx, full.length - FORECAST_HOURS));
+    const win = a => a ? a.slice(startIdx, startIdx+FORECAST_HOURS) : a;
+    const time = win(full);
+    const need = a=>{ if(!a) throw new Error("missing pressure-level field"); return win(a); };
+    const grid = pts.map((p,k)=>{
+      const h = arr[k].hourly;
+      return { i:p.i, j:p.j, lat:p.lat, lon:p.lon,
+        sp925:need(h.wind_speed_925hPa),  dr925:need(h.wind_direction_925hPa),
+        sp850:need(h.wind_speed_850hPa),  dr850:need(h.wind_direction_850hPa),
+        t925:need(h.temperature_925hPa),  rh925:need(h.relative_humidity_925hPa),
+        cape:win(h.cape||[]),
+        pr:win(h.precipitation||[]),
+        gust:win(h.wind_gusts_10m||[]) };
+    });
+    // Terrain elevation (static, Copernicus DEM 90m via Open-Meteo) — optional enhancement
+    try{
+      const elev = await fetchElevation(lats, lons, ac.signal);
+      if(elev && elev.length===grid.length) grid.forEach((g,k)=>{ g.elev = elev[k]; });
+    }catch(e){ /* terrain optional — weather still works without it */ }
+    data = { time, grid, hours:time.length };
+    seriesCache=null;
+    confShown=false; { const cb=document.getElementById('confBody'); if(cb) cb.innerHTML=''; }
+    // snap slider to current hour
+    hourIdx = nearestHourIndex(time);
+    document.getElementById('hourSlider').max = time.length-1;
+    document.getElementById('hourSlider').value = hourIdx;
+    try{ localStorage.setItem("wa_cache", JSON.stringify({center, data, at:Date.now()})); }catch(e){}
+    render();
+    setStatus(false, "");
+    loadConfidence();   // background auto-load (cached per location)
+  }catch(err){
+    if(err && err.name==='AbortError') return;   // superseded by a newer request
+    // fall back to cache — loud about it, never silent-stale
+    const c = loadCache();
+    if(c){ center=c.center; data=c.data; hourIdx=Math.min(hourIdx,data.hours-1);
+      render(); setStatus(false, "⚠ "+I18N[lang].offline); }
+    else setStatus(false, "⚠ "+I18N[lang].failed);
+  }finally{
+    if(inflight===ac) inflight=null;
+    document.getElementById('refreshBtn').disabled = false;
+  }
+}
+
+function loadCache(){
+  try{ const c=JSON.parse(localStorage.getItem("wa_cache")); return c&&c.data?c:null; }catch(e){ return null; }
+}
+function nearestHourIndex(times){
+  const now=Date.now();
+  let best=0,bd=1e18;
+  times.forEach((t,i)=>{ const d=Math.abs(new Date(t).getTime()-now); if(d<bd){bd=d;best=i;} });
+  return best;
+}
+
+/* ================= PHYSICS: convergence ================= */
+// meteorological dir = FROM direction. Component of motion (toward):
+// u = -speed*sin(dir);  v = -speed*cos(dir)
+function uv(speed, dirDeg){
+  if(speed==null || dirDeg==null || !isFinite(speed) || !isFinite(dirDeg)) return { u:0, v:0 };
+  const r = dirDeg*Math.PI/180;
+  return { u:-speed*Math.sin(r), v:-speed*Math.cos(r) };
+}
+const ASCENT_DEPTH = 1500;   // m — boundary-layer depth for continuity-derived ascent
+// grid spacing in metres at the current latitude
+function gridDX(){ return SPACING*111320*Math.cos(center.lat*Math.PI/180); }
+function gridDY(){ return SPACING*111320; }
+
+// build GRID_N x GRID_N matrices of u,v at a pressure level for a given hour
+function fields(hr, lvl){
+  lvl = lvl || '925';
+  const spK = lvl==='850'?'sp850':'sp925', drK = lvl==='850'?'dr850':'dr925';
+  const U=[], V=[];
+  for(let i=0;i<GRID_N;i++){ U.push(new Array(GRID_N)); V.push(new Array(GRID_N)); }
+  data.grid.forEach(g=>{ const c=uv(g[spK][hr], g[drK][hr]); U[g.i][g.j]=c.u; V[g.i][g.j]=c.v; });
+  return {U,V};
+}
+// horizontal convergence (s^-1) at interior points via central differences
+function convergenceField(hr, lvl){
+  const {U,V}=fields(hr, lvl);
+  const dx=gridDX(), dy=gridDY();
+  const C=[];
+  for(let i=0;i<GRID_N;i++){ C.push(new Array(GRID_N).fill(null)); }
+  for(let i=1;i<GRID_N-1;i++){
+    for(let j=1;j<GRID_N-1;j++){
+      const dudx = (U[i][j+1]-U[i][j-1])/(2*dx);
+      const dvdy = (V[i-1][j]-V[i+1][j])/(2*dy);   // row i-1 = north
+      C[i][j] = -(dudx + dvdy);   // convergence = -divergence
+    }
+  }
+  return C;
+}
+
+// specific humidity (kg/kg) from RH(%), T(°C), pressure(hPa) — Tetens
+function specHum(rh, tC, pHpa){
+  if(rh==null || tC==null || !isFinite(rh) || !isFinite(tC)) return 0;
+  const es = 6.112*Math.exp(17.67*tC/(tC+243.5));   // sat vapour pressure, hPa
+  const e  = Math.max(0, rh/100)*es;                // actual vapour pressure
+  const w  = 0.622*e/(pHpa - e);                    // mixing ratio kg/kg
+  return w/(1+w);                                   // specific humidity kg/kg
+}
+
+// moisture-flux convergence at 925 hPa (g/kg per hour) = -∇·(qV)
+function mfcField(hr){
+  const Q=[],U=[],V=[];
+  for(let i=0;i<GRID_N;i++){ Q.push(new Array(GRID_N)); U.push(new Array(GRID_N)); V.push(new Array(GRID_N)); }
+  data.grid.forEach(g=>{
+    Q[g.i][g.j]=specHum(g.rh925[hr], g.t925[hr], 925);
+    const c=uv(g.sp925[hr], g.dr925[hr]); U[g.i][g.j]=c.u; V[g.i][g.j]=c.v;
+  });
+  const dx=gridDX(), dy=gridDY();
+  const M=[];
+  for(let i=0;i<GRID_N;i++){ M.push(new Array(GRID_N).fill(null)); }
+  for(let i=1;i<GRID_N-1;i++){
+    for(let j=1;j<GRID_N-1;j++){
+      const dqdx=(Q[i][j+1]-Q[i][j-1])/(2*dx);
+      const dqdy=(Q[i-1][j]-Q[i+1][j])/(2*dy);
+      const dudx=(U[i][j+1]-U[i][j-1])/(2*dx);
+      const dvdy=(V[i-1][j]-V[i+1][j])/(2*dy);
+      const adv  = U[i][j]*dqdx + V[i][j]*dqdy;   // V·∇q  (kg/kg /s)
+      const conv = Q[i][j]*(dudx+dvdy);           // q·∇·V
+      M[i][j] = -(adv+conv)*1000*3600;            // → g/kg per hour
+    }
+  }
+  return M;
+}
+
+// continuity-derived ascent (cm/s) from low-level convergence: w ≈ conv × depth
+function ascentFromConv(cvg){ return cvg*ASCENT_DEPTH*100; }
+
+// terrain elevation available?
+function hasElevation(){ return !!(data && data.grid[0] && data.grid[0].elev!=null); }
+// orographic ascent (cm/s) at centre: w_oro = V·∇z (air flowing toward rising terrain)
+function oroAscent(hr){
+  if(!hasElevation()) return null;
+  const E=[]; for(let i=0;i<GRID_N;i++) E.push(new Array(GRID_N));
+  data.grid.forEach(g=>{ E[g.i][g.j]=g.elev; });
+  const i=CENTER, j=CENTER;
+  if(E[i][j+1]==null||E[i][j-1]==null||E[i-1][j]==null||E[i+1][j]==null) return null;
+  const dx=gridDX(), dy=gridDY();
+  const dzdx=(E[i][j+1]-E[i][j-1])/(2*dx);
+  const dzdy=(E[i-1][j]-E[i+1][j])/(2*dy);   // row i-1 = north
+  const g=data.grid.find(x=>x.i===CENTER&&x.j===CENTER);
+  const c=uv(g.sp925[hr], g.dr925[hr]);
+  return (c.u*dzdx + c.v*dzdy)*100;           // m/s → cm/s
+}
+function categoryOf(c){
+  const L=I18N[lang].cats;
+  if(c<-TH.weak) return {k:'diverge', label:L.diverge, col:'var(--div)'};
+  if(c< TH.weak) return {k:'calm',    label:L.calm,    col:'var(--muted)'};
+  if(c< TH.mod)  return {k:'weak',    label:L.weak,    col:'var(--cvg1)'};
+  if(c< TH.strong)return{k:'mod',     label:L.mod,     col:'var(--cvg2)'};
+  return {k:'strong', label:L.strong, col:'var(--cvg3)'};
+}
+// Band qualifier for MFC (g/kg·h): negative = drying/diverging moisture
+function categoryMFC(m){
+  const B=I18N[lang].bands;
+  if(m<=0)            return {label:B.dry,  col:'var(--div)'};
+  if(m< MFC_TH.weak)  return {label:'',     col:'var(--muted)'};
+  if(m< MFC_TH.mod)   return {label:B.weak, col:'var(--cvg1)'};
+  if(m< MFC_TH.strong)return {label:B.mod,  col:'var(--cvg2)'};
+  return {label:B.strong, col:'var(--cvg3)'};
+}
+// Band qualifier for derived ascent (cm/s): negative = sinking
+function categoryAsc(a){
+  const B=I18N[lang].bands;
+  if(a<=0)             return {label:B.sink, col:'var(--div)'};
+  if(a< ASC_TH.weak)   return {label:'',     col:'var(--muted)'};
+  if(a< ASC_TH.mod)    return {label:B.weak, col:'var(--cvg1)'};
+  if(a< ASC_TH.strong) return {label:B.mod,  col:'var(--cvg2)'};
+  return {label:B.strong, col:'var(--cvg3)'};
+}
+
+/* Ingredients-based storm gating: lift (convergence) + moisture (RH) + instability (CAPE).
+   Convergence alone is only a trigger; it fires a storm only if fuel + instability are present. */
+/* Pure ingredient gate — usable per grid cell, not just the centre */
+function gate(cvg, rh, cape){
+  const liftOk  = cvg >= TH.weak;
+  const moistOk = rh >= ING.rhOn;
+  const instOk  = cape!=null && cape >= ING.capeOn;
+  const liftStrong  = cvg >= TH.mod;
+  const moistStrong = rh >= ING.rhStrong;
+  const instStrong  = cape!=null && cape >= ING.capeStrong;
+  const strong = (liftStrong?1:0)+(moistStrong?1:0)+(instStrong?1:0);
+  let level; // 0 calm/diverge · 1 uplift-only · 2 incomplete · 3 watch · 4 likely
+  if(!liftOk){ level = (cvg < -TH.weak)?-1:0; }
+  else if(moistOk && instOk){ level = (liftStrong && strong>=2) ? 4 : 3; }
+  else if(moistOk || instOk){ level = 2; }
+  else { level = 1; }
+  return { liftOk, moistOk, instOk, liftStrong, moistStrong, instStrong, level };
+}
+
+function stormIngredients(hr){
+  const C = convergenceField(hr, '925');
+  const cvg = C[CENTER][CENTER];                       // 925 hPa convergence (s^-1)
+  const C8 = convergenceField(hr, '850');
+  const cvg850 = C8[CENTER][CENTER];                   // 850 hPa convergence (s^-1)
+  const M = mfcField(hr);
+  const mfc = M[CENTER][CENTER];                        // moisture-flux convergence (g/kg/hr)
+  const ascent = ascentFromConv(cvg);        // derived ascent (cm/s)
+  const g = data.grid.find(x=>x.i===CENTER&&x.j===CENTER);
+  const rh = g.rh925[hr];                     // 925 hPa relative humidity
+  const cape = (g.cape&&g.cape[hr]!=null)?g.cape[hr]:null;
+  const gg = gate(cvg, rh, cape);
+  // convergence depth: deep = converging through 925 AND 850 (robust column)
+  let depth = 'none';
+  if(cvg >= TH.weak) depth = (cvg850 >= TH.weak) ? 'deep' : 'shallow';
+  // monsoon surge: strong sustained 850 hPa flow from the N–E quadrant
+  const sp8 = g.sp850[hr], dr8 = g.dr850[hr];
+  const dirNE = (dr8!=null && isFinite(dr8)) && (dr8>=SURGE.dirMin || dr8<=SURGE.dirMax);
+  const surge = (sp8!=null && isFinite(sp8) && sp8>=SURGE.spd && dirNE);
+  // orographic (upslope) lift from terrain
+  const oro = oroAscent(hr);                 // cm/s (null if no elevation)
+  const upslope = (oro!=null && oro >= ORO_TH.on);
+  const elev = g.elev!=null ? g.elev : null;
+  return Object.assign({ cvg, cvg850, rh, cape, mfc, ascent, depth, surge, sp850:sp8, dr850:dr8,
+                         oro, upslope, elev, capeUnknown: cape==null }, gg);
+}
+function verdictOf(level){
+  const V = I18N[lang].verdict;
+  switch(level){
+    case 4: return {label:V.likely,  col:'var(--cvg3)', txt:'#fff'};
+    case 3: return {label:V.watch,   col:'var(--cvg2)', txt:'#231400'};
+    case 2: return {label:V.partial, col:'var(--cvg1)', txt:'#231400'};
+    case 1: return {label:V.upliftOnly, col:'var(--panel2)', txt:'var(--ink)'};
+    case -1:return {label:V.diverge, col:'var(--div)', txt:'#04202e'};
+    default:return {label:V.calm,    col:'var(--panel2)', txt:'var(--muted)'};
+  }
+}
+function alphaWarm(t){ return CELL_ALPHA.min + t*(CELL_ALPHA.max-CELL_ALPHA.min); }
+function alphaCool(frac){ return 0.28 + 0.28*Math.min(1,frac); }   // diverging/low — visible, not dominant
+function cellColor(c){
+  if(c==null) return null;
+  if(c<=0) return {fill:'#38bdf8', a:alphaCool(Math.abs(c)/CVG_RAMP_MAX)};
+  const t=Math.min(1, c/CVG_RAMP_MAX);
+  // ramp yellow->orange->red
+  let col;
+  if(t<0.5){ col=lerpCol([253,230,138],[251,146,60], t/0.5); }
+  else{ col=lerpCol([251,146,60],[220,38,38],(t-0.5)/0.5); }
+  return {fill:`rgb(${col[0]},${col[1]},${col[2]})`, a:alphaWarm(t)};
+}
+function lerpCol(a,b,t){ return a.map((v,i)=>Math.round(v+(b[i]-v)*t)); }
+// CAPE instability ramp: teal -> green -> amber -> red across 0..3000 J/kg
+function capeColor(cape){
+  if(cape==null) return null;
+  const t=Math.min(1, cape/3000);
+  let col;
+  if(t<0.33) col=lerpCol([56,189,248],[52,211,153], t/0.33);       // teal->green
+  else if(t<0.66) col=lerpCol([52,211,153],[251,191,36],(t-0.33)/0.33); // green->amber
+  else col=lerpCol([251,191,36],[220,38,38],(t-0.66)/0.34);        // amber->red
+  return {fill:`rgb(${col[0]},${col[1]},${col[2]})`, a:alphaWarm(t)};
+}
+
+// MFC ramp (g/kg/hr): <=0 cool (drying/divergence), >0 warm across 0..MAX
+function mfcColor(m){
+  if(m==null) return null;
+  if(m<=0) return {fill:'#38bdf8', a:alphaCool(Math.abs(m)/MFC_RAMP_MAX)};
+  const t=Math.min(1, m/MFC_RAMP_MAX);
+  let col = t<0.5 ? lerpCol([253,230,138],[251,146,60], t/0.5) : lerpCol([251,146,60],[220,38,38],(t-0.5)/0.5);
+  return {fill:`rgb(${col[0]},${col[1]},${col[2]})`, a:alphaWarm(t)};
+}
+
+// Composite: colour a cell by its combined verdict level (ingredient overlap)
+function comboColor(level){
+  switch(level){
+    case 4: return {fill:'#dc2626', a:0.78};   // storm likely
+    case 3: return {fill:'#fb923c', a:0.66};   // watch
+    case 2: return {fill:'#fde68a', a:0.52};   // incomplete
+    case 1: return {fill:'#64748b', a:0.34};   // uplift only
+    default: return null;                       // calm / diverging → clear
+  }
+}
+
+// Terrain elevation ramp: green (low) -> tan -> brown (high)
+function elevColor(e, emin, emax){
+  if(e==null) return null;
+  const t=Math.max(0,Math.min(1,(e-emin)/Math.max(1,emax-emin)));
+  let col = t<0.5 ? lerpCol([34,120,66],[196,176,96], t/0.5) : lerpCol([196,176,96],[124,74,42],(t-0.5)/0.5);
+  return {fill:`rgb(${col[0]},${col[1]},${col[2]})`, a:0.5};
+}
+
+/* ================= RENDER ================= */
+function render(){
+  if(!data) return;
+  const hr = hourIdx;
+  const C = convergenceField(hr);
+  drawCells(C);
+  drawArrows(hr);
+  drawReadout(C, hr);
+  drawSpark();
+  drawLegend();
+  document.getElementById('readout').style.display='block';
+  document.getElementById('timeline').style.display='block';
+  document.getElementById('confCard').style.display='block';
+  document.getElementById('approachCard').style.display='block';
+  drawApproach();
+  updateFocusFav();
+  if(confShown) renderConfidence();
+}
+
+function drawCells(C){
+  cellLayer.clearLayers();
+  const half=SPACING/2, hr=hourIdx;
+  // fast index → grid-point lookup
+  const G=[]; for(let i=0;i<GRID_N;i++) G.push(new Array(GRID_N));
+  data.grid.forEach(g=>{ G[g.i][g.j]=g; });
+  const gAt=(i,j)=>G[i][j];
+
+  if(overlayMode==='combo'){          // categorical — keep crisp cells
+    const CC=convergenceField(hr,'925');
+    for(let i=1;i<GRID_N-1;i++) for(let j=1;j<GRID_N-1;j++){
+      const cvg=CC[i][j]; if(cvg==null) continue;
+      const g=gAt(i,j);
+      const cape=(g.cape&&g.cape[hr]!=null)?g.cape[hr]:null;
+      const cc=comboColor(gate(cvg, g.rh925[hr], cape).level); if(!cc) continue;
+      L.rectangle([[g.lat-half,g.lon-half],[g.lat+half,g.lon+half]],
+        {stroke:false, fillColor:cc.fill, fillOpacity:cc.a, interactive:false}).addTo(cellLayer);
+    }
+    drawConvergenceAxis(CC, gAt);
+    return;
+  }
+  if(overlayMode==='cape'){
+    smoothField((i,j)=>{const g=gAt(i,j); return (g.cape&&g.cape[hr]!=null)?g.cape[hr]:null;}, capeColor, 0,GRID_N-1,0,GRID_N-1, gAt);
+    return;
+  }
+  if(overlayMode==='mfc'){
+    const M=mfcField(hr);
+    smoothField((i,j)=>M[i][j], mfcColor, 1,GRID_N-2,1,GRID_N-2, gAt);
+    return;
+  }
+  if(overlayMode==='terr'){
+    if(!hasElevation()) return;
+    const els=data.grid.map(g=>g.elev).filter(v=>v!=null);
+    const emin=Math.min(...els), emax=Math.max(...els);
+    smoothField((i,j)=>gAt(i,j).elev, e=>elevColor(e,emin,emax), 0,GRID_N-1,0,GRID_N-1, gAt);
+    return;
+  }
+  if(overlayMode==='cvg850'){
+    const C8=convergenceField(hr,'850');
+    smoothField((i,j)=>C8[i][j], cellColor, 1,GRID_N-2,1,GRID_N-2, gAt);
+    return;
+  }
+  smoothField((i,j)=>C[i][j], cellColor, 1,GRID_N-2,1,GRID_N-2, gAt);   // 925 convergence
+  drawConvergenceAxis(C, gAt);
+}
+
+// Convergence axis: ridge of the convergence field (line of maximum convergence)
+function drawConvergenceAxis(C, gAt){
+  if(!C) return;
+  const thr=TH.mod, N=GRID_N;
+  const isRidge=(i,j)=>{
+    const v=C[i][j]; if(v==null||v<thr) return false;
+    const L=C[i][j-1], R=C[i][j+1], U=C[i-1][j], D=C[i+1][j];
+    const hmax=(L==null||v>=L)&&(R==null||v>=R);   // crest across x
+    const vmax=(U==null||v>=U)&&(D==null||v>=D);   // crest across y
+    return hmax||vmax;
+  };
+  const mark={};
+  for(let i=1;i<N-1;i++) for(let j=1;j<N-1;j++){ if(isRidge(i,j)) mark[i+'_'+j]=true; }
+  const keys=Object.keys(mark); if(!keys.length) return;
+  const segs=[];
+  const dirs=[[0,1],[1,0],[1,1],[1,-1]];   // connect to right/down neighbours (no dup)
+  keys.forEach(k=>{
+    const [i,j]=k.split('_').map(Number);
+    dirs.forEach(([di,dj])=>{ if(mark[(i+di)+'_'+(j+dj)]){
+      const a=gAt(i,j), b=gAt(i+di,j+dj); if(a&&b) segs.push([[a.lat,a.lon],[b.lat,b.lon]]); }});
+  });
+  // dark casing then bright line, so the axis reads on any background
+  segs.forEach(s=>L.polyline(s,{color:'#0b1a30',weight:5,opacity:0.5,lineCap:'round',interactive:false}).addTo(cellLayer));
+  segs.forEach(s=>L.polyline(s,{color:'#ffd27a',weight:2.6,opacity:0.98,lineCap:'round',interactive:false}).addTo(cellLayer));
+  keys.forEach(k=>{ const [i,j]=k.split('_').map(Number); const g=gAt(i,j);
+    L.circleMarker([g.lat,g.lon],{radius:2.8,weight:1,color:'#0b1a30',fillColor:'#ffd27a',fillOpacity:1,interactive:false}).addTo(cellLayer); });
+}
+
+// parse 'rgb(r,g,b)' or '#rrggbb' to [r,g,b]
+function toRGB(s){
+  if(s[0]==='#'){ const n=parseInt(s.slice(1),16); return [(n>>16)&255,(n>>8)&255,n&255]; }
+  const m=s.match(/\d+/g); return m?[+m[0],+m[1],+m[2]]:[0,0,0];
+}
+// render a continuous field as a bilinear-smoothed image overlay (browser upscales the point grid)
+function smoothField(valAt, colorFn, i0,i1,j0,j1, gAt){
+  const rows=i1-i0+1, cols=j1-j0+1;
+  const cv=document.createElement('canvas'); cv.width=cols; cv.height=rows;
+  const ctx=cv.getContext('2d'); const im=ctx.createImageData(cols,rows);
+  for(let i=i0;i<=i1;i++) for(let j=j0;j<=j1;j++){
+    const idx=((i-i0)*cols+(j-j0))*4;
+    const v=valAt(i,j);
+    const cc=(v==null||!isFinite(v))?null:colorFn(v);
+    if(cc){ const c=toRGB(cc.fill); im.data[idx]=c[0]; im.data[idx+1]=c[1]; im.data[idx+2]=c[2]; im.data[idx+3]=Math.round((cc.a||0)*255); }
+    else im.data[idx+3]=0;
+  }
+  ctx.putImageData(im,0,0);
+  const h=SPACING/2;
+  const nLat=gAt(i0,j0).lat+h, sLat=gAt(i1,j0).lat-h, wLon=gAt(i0,j0).lon-h, eLon=gAt(i0,j1).lon+h;
+  L.imageOverlay(cv.toDataURL(), [[sLat,wLon],[nLat,eLon]], {opacity:1, interactive:false}).addTo(cellLayer);
+}
+
+function drawArrows(hr){
+  arrowLayer.clearLayers();
+  if(irOn) return;   // keep IR view clear
+  data.grid.forEach(g=>{
+    if(g.i%ARROW_STRIDE!==0 || g.j%ARROW_STRIDE!==0) return;   // thin out for readability
+    const sp=g.sp925[hr], dir=g.dr925[hr];
+    if(sp==null || dir==null || !isFinite(sp) || !isFinite(dir)) return;
+    const len=6+Math.min(16,sp*2.2);
+    // arrow points toward direction of motion = dir+180
+    const rot=(dir+180)%360;
+    const html=`<div class="arrow" style="transform:rotate(${rot}deg)">
+      <svg width="22" height="${len+8}" viewBox="0 0 22 ${len+8}">
+        <line x1="11" y1="${len+6}" x2="11" y2="6" stroke="#cbd5e1" stroke-width="2"/>
+        <path d="M11 2 L6 11 L11 8 L16 11 Z" fill="#e2e8f0"/>
+      </svg></div>`;
+    L.marker([g.lat,g.lon],{icon:L.divIcon({className:'',html,iconSize:[22,len+8],iconAnchor:[11,(len+8)/2]}),interactive:false})
+      .addTo(arrowLayer);
+  });
+}
+
+function drawReadout(C, hr){
+  const cc = C[CENTER][CENTER];  // center interior point
+  const cat = categoryOf(cc);
+  const g = data.grid.find(x=>x.i===CENTER&&x.j===CENTER);
+  const disp = (cc*1e5).toFixed(1);
+  document.getElementById('r-val').textContent = (cc>0?'+':'')+disp;
+  const cel=document.getElementById('r-cat');
+  cel.textContent=cat.label; cel.style.background=cat.col;
+  cel.style.color = (cat.k==='calm')?'#0d1b2a':(cat.k==='diverge'?'#04202e':'#231400');
+  const ingM = stormIngredients(hr);
+  // convergence depth reliability tag
+  const dtag=document.getElementById('r-depth'); const D=I18N[lang].depth;
+  if(ingM.depth==='deep'){ dtag.textContent=D.deep; dtag.style.display=''; dtag.className='depthtag deep'; }
+  else if(ingM.depth==='shallow'){ dtag.textContent=D.shallow; dtag.style.display=''; dtag.className='depthtag shallow'; }
+  else { dtag.style.display='none'; }
+  // monsoon surge badge (only when active)
+  const sb=document.getElementById('r-surge');
+  if(ingM.surge){ sb.textContent='🌊 '+I18N[lang].surge+' · '+ingM.sp850.toFixed(0)+' m/s '+dirArrow(ingM.dr850); sb.style.display=''; }
+  else { sb.style.display='none'; }
+  // orographic upslope badge
+  const ob=document.getElementById('r-oro');
+  if(ingM.upslope){ ob.textContent='🏔️ '+I18N[lang].upslope+' +'+ingM.oro.toFixed(0)+' cm/s'; ob.style.display=''; }
+  else { ob.style.display='none'; }
+  document.getElementById('r-wind').textContent = g.sp925[hr].toFixed(1)+" m/s "+dirArrow(g.dr925[hr]);
+  const mcat=categoryMFC(ingM.mfc), acat=categoryAsc(ingM.ascent);
+  const rRh=document.getElementById('r-rh');
+  rRh.textContent=(ingM.mfc>0?'+':'')+ingM.mfc.toFixed(1); rRh.style.color=mcat.col;
+  const rRhCat=document.getElementById('r-rh-cat'); rRhCat.textContent=mcat.label; rRhCat.style.color=mcat.col;
+  const rPr=document.getElementById('r-pr');
+  rPr.textContent=(ingM.ascent>0?'+':'')+ingM.ascent.toFixed(0); rPr.style.color=acat.col;
+  const rPrCat=document.getElementById('r-pr-cat'); rPrCat.textContent=acat.label; rPrCat.style.color=acat.col;
+  const t=new Date(data.time[hr]);
+  baseTimeLabel = fmtTime(t);
+  document.getElementById('r-loc').textContent =
+    (center.name?(lang==='zh'?center.name.zh:center.name.en):`${center.lat.toFixed(3)}, ${center.lon.toFixed(3)}`)
+    + " · " + baseTimeLabel;
+  document.getElementById('tl-when').textContent = fmtTime(t);
+
+  // ---- storm-ingredient gating ----
+  const ing = ingM;
+  const vt = verdictText(ing);
+  const L = I18N[lang].ing;
+  const vb = document.getElementById('r-verdict');
+  vb.innerHTML = `<span class="dot"></span>${vt.full}`;
+  vb.style.background = vt.col; vb.style.color = vt.txt;
+  // strong-wind caution (model 10m gust) — a "bad weather, take care" flag, not a tree-fall prediction
+  const ww=document.getElementById('r-windwarn');
+  const gc=data.grid.find(x=>x.i===CENTER&&x.j===CENTER);
+  const gust=(gc.gust&&gc.gust[hr]!=null&&isFinite(gc.gust[hr]))?gc.gust[hr]:null;
+  if(gust!=null && gust>=GUST_STRONG){
+    const kmh=Math.round(gust*3.6), W=I18N[lang].windwarn;
+    const severe=gust>=GUST_SEVERE;
+    ww.textContent = `⚠ ${severe?W.severe:W.strong} ~${kmh} km/h · ${severe?W.actSevere:W.actStrong}`;
+    ww.className = 'windwarn'+(severe?' severe':'');
+    ww.style.display='';
+  } else { ww.style.display='none'; }
+  const capeTxt = ing.capeUnknown ? "—" : Math.round(ing.cape)+" J/kg";
+  const chip=(name,valTxt,on,strong)=>`
+    <div class="chip ${on?'on':'off'} ${strong?'strong':''}">
+      <span class="cname"><span class="tick"></span>${name}</span>
+      <span class="cval"><span class="mk">${on?'✓':'×'}</span>${valTxt}</span>
+    </div>`;
+  document.getElementById('r-ing').innerHTML =
+    chip(L.lift, (cc>0?'+':'')+(cc*1e5).toFixed(1), ing.liftOk, ing.liftStrong) +
+    chip(L.moist, Math.round(ing.rh)+"%", ing.moistOk, ing.moistStrong) +
+    chip(L.inst, capeTxt, ing.instOk, ing.instStrong);
+}
+
+function dirArrow(d){
+  const a=['↓','↙','←','↖','↑','↗','→','↘'];  // FROM-direction glyph
+  return a[Math.round(((d%360))/45)%8];
+}
+
+/* ============ Rain-approach tracker ============ */
+function compassName(bearing){
+  const zh=['北','东北','东','东南','南','西南','西','西北'];
+  const en=['N','NE','E','SE','S','SW','W','NW'];
+  const k=Math.round(((bearing%360))/45)%8;
+  return (lang==='zh'?zh:en)[k];
+}
+function computeApproach(hr){
+  if(!data) return null;
+  const cLat=center.lat, cLon=center.lon;
+  const kmLat=111.32, kmLon=111.32*Math.cos(cLat*Math.PI/180);
+  const dist=g=>Math.hypot((g.lon-cLon)*kmLon, (g.lat-cLat)*kmLat);
+  const bearing=g=>{ let a=Math.atan2((g.lon-cLon)*Math.cos(cLat*Math.PI/180), (g.lat-cLat))*180/Math.PI; return (a+360)%360; };
+  const wet=(g,h)=> g.pr && g.pr[h]!=null && g.pr[h]>=PR_MIN;
+  const nearestRain=h=>{ let best=null,bd=1e9; data.grid.forEach(g=>{ if(wet(g,h)){ const d=dist(g); if(d<bd){bd=d;best=g;} } }); return best?{g:best,d:bd}:null; };
+  const centerG=data.grid.find(x=>x.i===CENTER&&x.j===CENTER);
+  const rainingHere = wet(centerG,hr);
+  const near = nearestRain(hr);
+  // ETA: first upcoming hour the centre cell turns wet
+  let eta=null;
+  for(let h=hr; h<data.hours; h++){ if(wet(centerG,h)){ eta=h; break; } }
+  // trend: nearest-rain distance now vs a few hours ahead
+  let trend=null;
+  if(near){ const later=nearestRain(Math.min(hr+APPROACH_LOOK, data.hours-1));
+    if(later) trend = later.d < near.d-3 ? 'approach' : (later.d > near.d+3 ? 'recede' : 'steady'); }
+  // Wet spell: from the start of the current/upcoming event, walk forward tolerating short dry
+  // gaps; end at the first sustained dry run. Flag whether it's on/off vs unbroken.
+  let endsAt=null, intermittent=false;
+  const startH = rainingHere ? hr : eta;
+  if(startH!=null){
+    const DRY_GAP=2;   // this many consecutive dry hours ends the spell
+    let lastWet=startH, dry=0;
+    for(let h=startH; h<data.hours; h++){
+      if(wet(centerG,h)){ lastWet=h; dry=0; }
+      else { dry++; if(dry>=DRY_GAP) break; }
+    }
+    endsAt = Math.min(lastWet+1, data.hours-1);
+    for(let h=startH; h<lastWet; h++){ if(!wet(centerG,h)){ intermittent=true; break; } }
+  }
+  // hourly rain rates through the spell (wet hours only, so gaps show the on/off pattern)
+  let wetHours=[], peak=0, peakIdx=null;
+  if(startH!=null && endsAt!=null){
+    for(let h=startH; h<=endsAt && h<data.hours; h++){
+      const r=(centerG.pr && centerG.pr[h]!=null && isFinite(centerG.pr[h])) ? centerG.pr[h] : 0;
+      if(r>=PR_MIN){ wetHours.push({h, r}); if(r>peak){ peak=r; peakIdx=h; } }
+    }
+    if(wetHours.length>12) wetHours=wetHours.slice(0,12);
+  }
+  return { rainingHere, near: near?{dist:near.d, bearing:bearing(near.g)}:null, eta, trend, endsAt, intermittent, wetHours, peak, peakIdx };
+}
+function rainLevel(r){ const R=I18N[lang].rlev;
+  return r>=15?R.torr : r>=7.5?R.heavy : r>=2.5?R.mod : R.light; }
+function drawApproach(){
+  const el=document.getElementById('approachBody'); if(!el||!data) return;
+  const nowIdx=nearestHourIndex(data.time);        // always "from now", independent of the slider
+  const A=computeApproach(nowIdx), L=I18N[lang].appr;
+  if(!A){ el.innerHTML=''; return; }
+  const fmt=idx=>String(new Date(data.time[idx]).getHours()).padStart(2,'0')+':00';
+  const easing=()=>{ if(A.endsAt==null) return ''; const inN=A.endsAt-nowIdx;
+    const lab = A.intermittent ? L.onoff : L.cont;
+    return `<div class="apsub2">${lab} <b>${fmt(A.endsAt)}</b>${inN>0?` (${inN}${L.hAbbr})`:''}</div>`; };
+  const rates=()=>{ if(!A.wetHours||!A.wetHours.length) return '';
+    const items=A.wetHours.map(o=>{ const hh=fmt(o.h); const rr=o.r<1?o.r.toFixed(1):Math.round(o.r);
+      const pk=(o.h===A.peakIdx)?' class="appk"':''; return `<span${pk}>${hh}·${rr}</span>`; }).join('');
+    return `<div class="aprates">${items}<span class="apunit">mm/h · ${rainLevel(A.peak)}</span></div>`; };
+  let html='';
+  if(A.rainingHere){
+    html+=`<div class="apmain rain">🌧 ${L.here}</div>`;
+    html+=rates();
+    html+=easing();
+  } else if(A.eta!=null){
+    const inN=A.eta-nowIdx;
+    html+=`<div class="apmain rain">🌧 ${L.reaching} <b>${fmt(A.eta)}</b>${inN>0?` <span class="apsub">(${inN}${L.hAbbr})</span>`:''}</div>`;
+    if(A.near) html+=`<div class="apsub2">${L.nearest}: ${Math.round(A.near.dist)} km ${compassName(A.near.bearing)}${A.trend?` · ${L[A.trend]}`:''}</div>`;
+    html+=rates();
+    html+=easing();
+  } else if(A.near){
+    html+=`<div class="apmain">${L.nearest}: <b>${Math.round(A.near.dist)} km ${compassName(A.near.bearing)}</b>${A.trend?` · ${L[A.trend]}`:''}</div>`;
+    html+=`<div class="apsub2">${L.notReach}</div>`;
+  } else {
+    html+=`<div class="apmain dry">${L.none}</div>`;
+  }
+  html+=`<div class="apnote">${L.note}</div>`;
+  el.innerHTML=html;
+}
+
+/* center-point convergence time series */
+let seriesCache=null;
+function centerSeries(){
+  if(seriesCache) return seriesCache;
+  const out=[];
+  for(let h=0;h<data.hours;h++){ const ing=stormIngredients(h); out.push({v:ing.cvg, lvl:ing.level}); }
+  seriesCache=out; return out;
+}
+
+function drawSpark(){
+  const cv=document.getElementById('spark');
+  const S=centerSeries(); const ser=S.map(o=>isFinite(o.v)?o.v:0);
+  const W=cv.clientWidth||600, H=70, dpr=window.devicePixelRatio||1;
+  cv.width=W*dpr; cv.height=H*dpr; const x=cv.getContext('2d'); x.scale(dpr,dpr);
+  x.clearRect(0,0,W,H);
+  const absmax=ser.reduce((m,v)=>Math.max(m,Math.abs(v)),0);
+  const mx=Math.max(0.5e-4, absmax);
+  const mid=H*0.5;
+  const px=i=>i/(ser.length-1)*(W-6)+3;
+  const py=v=>mid - (v/mx)*(H*0.40);
+  // storm-hour bands (behind everything): amber watch (lvl3), red likely (lvl4)
+  const bw=(W-6)/(ser.length-1);
+  S.forEach((o,i)=>{ if(o.lvl>=3){ x.fillStyle=o.lvl>=4?'rgba(220,38,38,.22)':'rgba(251,146,60,.16)';
+    x.fillRect(px(i)-bw/2,0,bw,H); } });
+  // zero line
+  x.strokeStyle='#24405c'; x.lineWidth=1; x.beginPath(); x.moveTo(0,mid); x.lineTo(W,mid); x.stroke();
+  // area
+  x.beginPath(); x.moveTo(px(0),py(ser[0]));
+  ser.forEach((v,i)=>x.lineTo(px(i),py(v)));
+  x.lineTo(px(ser.length-1),mid); x.lineTo(px(0),mid); x.closePath();
+  const grad=x.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'rgba(251,146,60,.5)'); grad.addColorStop(.5,'rgba(251,146,60,.05)');
+  grad.addColorStop(1,'rgba(56,189,248,.25)');
+  x.fillStyle=grad; x.fill();
+  // line
+  x.beginPath(); ser.forEach((v,i)=> i?x.lineTo(px(i),py(v)):x.moveTo(px(i),py(v)));
+  x.strokeStyle='#f59e0b'; x.lineWidth=2; x.stroke();
+  // fire-risk dots along the top (tap targets)
+  S.forEach((o,i)=>{ if(o.lvl>=3){ x.fillStyle=o.lvl>=4?'#dc2626':'#fb923c';
+    x.beginPath(); x.arc(px(i),7,3.6,0,7); x.fill();
+    x.strokeStyle='rgba(255,255,255,.5)'; x.lineWidth=1; x.stroke(); } });
+  // current marker
+  x.fillStyle='#fff'; x.beginPath(); x.arc(px(hourIdx),py(ser[hourIdx]),3.5,0,7); x.fill();
+  x.strokeStyle='#f59e0b'; x.lineWidth=2; x.stroke();
+}
+
+function drawLegend(){
+  const L=I18N[lang];
+  const el=document.getElementById('legend');
+  if(overlayMode==='terr'){
+    if(!hasElevation()){
+      el.innerHTML = `<span class="grp" style="color:var(--warn)">${lang==='zh'?'⛰ 海拔数据加载中或不可用':'⛰ elevation loading or unavailable'}</span>`;
+      return;
+    }
+    const els=data.grid.map(g=>g.elev).filter(v=>v!=null);
+    const range=' · '+Math.round(Math.min(...els))+'–'+Math.round(Math.max(...els))+' m';
+    el.innerHTML =
+      `<span class="grp"><span class="sw" style="background:rgb(34,120,66)"></span>${lang==='zh'?'低':'low'}</span>`+
+      `<span class="grp"><span class="sw" style="background:rgb(196,176,96)"></span>${lang==='zh'?'中':'mid'}</span>`+
+      `<span class="grp"><span class="sw" style="background:rgb(124,74,42)"></span>${lang==='zh'?'高':'high'}</span>`+
+      `<span class="grp" style="color:#8ba3bd">${lang==='zh'?'海拔':'elevation'}${range}</span>`;
+    return;
+  }
+  if(overlayMode==='combo'){
+    const V=I18N[lang].verdict;
+    el.innerHTML =
+      `<span class="grp"><span class="sw" style="background:#64748b"></span>${V.upliftOnly.split(' —')[0].split(' ·')[0]}</span>`+
+      `<span class="grp"><span class="sw" style="background:#fde68a"></span>${V.partial}</span>`+
+      `<span class="grp"><span class="sw" style="background:#fb923c"></span>${V.watch}</span>`+
+      `<span class="grp"><span class="sw" style="background:#dc2626"></span>${V.likely}</span>`+
+      `<span class="grp" style="color:#8ba3bd">${lang==='zh'?'三要素叠加':'ingredients overlap'}</span>`+
+      `<span class="grp"><span class="sw" style="background:#ffd27a;height:3px;width:20px;border:none"></span>${lang==='zh'?'辐合线':'conv line'}</span>`;
+    return;
+  }
+  if(overlayMode==='cape'){
+    el.innerHTML =
+      `<span class="grp"><span class="sw" style="background:#38bdf8"></span>${lang==='zh'?'低':'low'}</span>`+
+      `<span class="grp"><span class="sw" style="background:#34d399"></span>500</span>`+
+      `<span class="grp"><span class="sw" style="background:#fbbf24"></span>1500</span>`+
+      `<span class="grp"><span class="sw" style="background:#dc2626"></span>3000+ J/kg</span>`+
+      `<span class="grp" style="color:#8ba3bd">${lang==='zh'?'对流有效位能':'CAPE'}</span>`;
+    return;
+  }
+  if(overlayMode==='mfc'){
+    el.innerHTML =
+      `<span class="grp"><span class="sw" style="background:#38bdf8"></span>${lang==='zh'?'干/发散':'dry/div'}</span>`+
+      `<span class="grp"><span class="sw" style="background:#fde68a"></span>${lang==='zh'?'弱':'weak'}</span>`+
+      `<span class="grp"><span class="sw" style="background:#fb923c"></span>${lang==='zh'?'中':'mod'}</span>`+
+      `<span class="grp"><span class="sw" style="background:#dc2626"></span>5+ g/kg·h</span>`+
+      `<span class="grp" style="color:#8ba3bd">${lang==='zh'?'水汽通量辐合':'moisture-flux conv'}</span>`;
+    return;
+  }
+  el.innerHTML =
+    `<span class="grp"><span class="sw" style="background:#38bdf8"></span>${L.cats.diverge}</span>`+
+    `<span class="grp"><span class="sw" style="background:#fde68a"></span>${L.cats.weak}</span>`+
+    `<span class="grp"><span class="sw" style="background:#fb923c"></span>${L.cats.mod}</span>`+
+    `<span class="grp"><span class="sw" style="background:#dc2626"></span>${L.cats.strong}</span>`+
+    `<span class="grp" style="color:#8ba3bd">↑ = ${lang==='zh'?'风向':'wind'}</span>`+
+    `<span class="grp"><span class="sw" style="background:#ffd27a;height:3px;width:20px;border:none"></span>${lang==='zh'?'辐合线':'conv line'}</span>`;
+}
+function setOverlay(mode){
+  overlayMode=mode;
+  document.querySelectorAll('.segbtn').forEach(b=>b.classList.toggle('active', b.dataset.mode===mode));
+  if(data){ drawCells(convergenceField(hourIdx)); drawLegend(); }
+}
+
+/* ================= INTERACTION ================= */
+function onSlide(v){ hourIdx=+v; render(); syncIRToHour(); }
+
+function goManual(){
+  const la=parseFloat(document.getElementById('inLat').value);
+  const lo=parseFloat(document.getElementById('inLon').value);
+  if(!isFinite(la)||!isFinite(lo)||la<-90||la>90||lo<-180||lo>180){
+    gpsInfo(lang==='zh'?"请输入有效的经纬度":"Enter a valid latitude & longitude", true);
+    return;
+  }
+  center={lat:+la.toFixed(4), lon:+lo.toFixed(4), name:null};
+  centerPin.setLatLng([center.lat,center.lon]); fitGrid();
+  syncFields(); saveCenter(); gpsInfo(""); loadData();
+}
+
+function useMyLocation(){
+  if(!('geolocation' in navigator)){ gpsInfo(lang==='zh'?"此设备不支持定位":"Geolocation not supported", true); return; }
+  const btn=document.getElementById('geoBtn'); btn.disabled=true;
+  gpsInfo(lang==='zh'?"定位中…":"Locating…");
+  navigator.geolocation.getCurrentPosition(p=>{
+    btn.disabled=false;
+    center={lat:+p.coords.latitude.toFixed(4), lon:+p.coords.longitude.toFixed(4), name:null};
+    centerPin.setLatLng([center.lat,center.lon]); fitGrid();
+    syncFields(); saveCenter();
+    const acc=p.coords.accuracy?Math.round(p.coords.accuracy):null;
+    gpsInfo(acc?(lang==='zh'?`已定位 · 精度约 ${acc}米`:`Located · ~${acc}m accuracy`):"");
+    loadData();
+  },err=>{
+    btn.disabled=false;
+    const m={1:lang==='zh'?"定位权限被拒绝，请在设置中启用":"GPS permission denied — enable in Settings",
+             2:lang==='zh'?"定位信号不可用，请到户外再试":"GPS signal unavailable — try outdoors",
+             3:lang==='zh'?"定位超时，请到开阔处再试":"GPS timed out — try in an open area"};
+    gpsInfo(m[err.code]||(lang==='zh'?"定位失败":"Location failed"), true);
+  },{enableHighAccuracy:true, timeout:15000, maximumAge:0});
+}
+
+function gpsInfo(msg, err){
+  const el=document.getElementById('gpsInfo');
+  el.textContent=msg||""; el.classList.toggle('err', !!err);
+}
+
+/* ============ Himawari-9 IR loop (NASA GIBS) — 2-layer ping-pong ============ */
+let irPanesReady=false, irOn=false, irFrames=[], irIdx=0, irTimer=null;
+let irLyr={A:null,B:null}, irVis='A';
+let irPaused=false, irBgStopped=false, irPlayStart=0;
+let irOpacity=(()=>{ const v=parseFloat(localStorage.getItem('wa_iropacity')); return isFinite(v)?v:HIMAWARI.opacity; })();
+function setIrOpacity(pct){
+  irOpacity=Math.max(0.05, Math.min(1, pct/100));
+  try{ localStorage.setItem('wa_iropacity', irOpacity); }catch(e){}
+  if(irOn){ const p=map.getPane('irp'+irVis); if(p) p.style.opacity=irOpacity; }
+}
+function irTimeStr(d){
+  const p=n=>String(n).padStart(2,'0');
+  return d.getUTCFullYear()+'-'+p(d.getUTCMonth()+1)+'-'+p(d.getUTCDate())
+    +'T'+p(d.getUTCHours())+':'+p(d.getUTCMinutes())+':00Z';
+}
+function irUrlFor(d){
+  return `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${HIMAWARI.layer}/default/${irTimeStr(d)}/${HIMAWARI.tms}/{z}/{y}/{x}.png`;
+}
+function irTimestamps(){
+  const step=HIMAWARI.stepMin*60000;
+  const end=Math.floor((Date.now()-HIMAWARI.latencyMin*60000)/step)*step;
+  const out=[];
+  for(let k=HIMAWARI.frames-1;k>=0;k--) out.push(new Date(end-k*step));
+  return out;
+}
+function irUpdateTime(){
+  const d=irFrames[irIdx]; if(!d) return;
+  const hhmm=d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  document.getElementById('irTime').textContent = '🛰 '+hhmm+(lang==='zh'?' 红外':' IR');
+}
+// only two panes ever — no stacked-layer texture eviction on iOS
+function ensureIrPanes(){
+  if(irPanesReady) return;
+  ['A','B'].forEach((n,i)=>{
+    const name='irp'+n;
+    if(!map.getPane(name)) map.createPane(name);
+    const p=map.getPane(name);
+    p.style.zIndex=250+i; p.style.opacity=0; p.style.pointerEvents='none';
+    p.style.transition='opacity '+HIMAWARI.fadeMs+'ms linear';
+    p.style.filter='saturate(1.35) brightness(1.25)';   // lift keyed cold-top colours
+  });
+  irPanesReady=true;
+}
+// Tile layer that keys out the grey IR background on a canvas, keeping coloured cold tops
+const IRTile = L.TileLayer.extend({
+  createTile:function(coords, done){
+    const size=this.getTileSize();
+    const tile=document.createElement('canvas'); tile.width=size.x; tile.height=size.y;
+    const img=new Image(); img.crossOrigin='anonymous';
+    const url=this.getTileUrl(coords);
+    img.onload=function(){
+      const ctx=tile.getContext('2d');
+      ctx.drawImage(img,0,0,size.x,size.y);
+      try{
+        const id=ctx.getImageData(0,0,size.x,size.y), d=id.data, lo=IR_SATMIN, hi=IR_SATFULL;
+        for(let i=0;i<d.length;i+=4){
+          const r=d[i],g=d[i+1],b=d[i+2];
+          const mx=Math.max(r,g,b), mn=Math.min(r,g,b);
+          const sat = mx===0?0:(mx-mn)/mx;
+          let a=(sat-lo)/(hi-lo); a=a<0?0:(a>1?1:a);
+          d[i+3]=Math.round(d[i+3]*a);       // grey → transparent, colour → kept
+        }
+        ctx.putImageData(id,0,0);
+      }catch(e){ /* CORS-tainted: leave tile unprocessed */ }
+      done(null, tile);
+    };
+    img.onerror=function(){ done(null, tile); };   // missing tile → blank (basemap shows)
+    img.src=url;
+    return tile;
+  }
+});
+function irMakeLayer(name){
+  return new IRTile('', {maxNativeZoom:HIMAWARI.maxZoom, minZoom:0, pane:'irp'+name,
+    crossOrigin:'anonymous', opacity:1, keepBuffer:4, updateWhenIdle:false});
+}
+// load `frame` into the hidden layer; reveal it only once fully loaded, then schedule the next
+function irAdvance(nextIdx, isFirst){
+  const hiddenName = isFirst ? irVis : (irVis==='A'?'B':'A');
+  const hidden = irLyr[hiddenName];
+  let loaded=false, waited=isFirst;
+  const reveal=()=>{
+    if(!irOn || irPaused || !(loaded && waited)) return;
+    map.getPane('irp'+hiddenName).style.opacity = irOpacity;
+    if(hiddenName!==irVis) map.getPane('irp'+irVis).style.opacity = 0;
+    irVis=hiddenName; irIdx=nextIdx; irUpdateTime();
+    if(Date.now()-irPlayStart > HIMAWARI.autostopMs){ irPause(); return; }   // battery/data auto-stop
+    const hold = (irIdx===irFrames.length-1) ? HIMAWARI.holdMs : HIMAWARI.playMs;
+    irTimer=setTimeout(()=>irAdvance((irIdx+1)%irFrames.length,false), hold);
+  };
+  hidden.off('load'); hidden.once('load', ()=>{ loaded=true; reveal(); });
+  hidden.setUrl(irUrlFor(irFrames[nextIdx]));
+  if(!isFirst) setTimeout(()=>{ waited=true; reveal(); }, 320);        // min display for current frame
+  setTimeout(()=>{ if(!loaded){ loaded=true; reveal(); } }, 5000);     // fallback if load never fires
+}
+function irPause(){
+  if(irTimer){ clearTimeout(irTimer); irTimer=null; }
+  irPaused=true;
+  const el=document.getElementById('irTime');
+  if(el){ el.textContent = lang==='zh'?'⏸ 已暂停 · 点击播放':'⏸ paused · tap to play'; el.classList.add('irresume'); }
+}
+function irResume(){
+  if(!irOn || !irPaused) return;
+  irPaused=false; irPlayStart=Date.now();
+  const el=document.getElementById('irTime'); if(el) el.classList.remove('irresume');
+  irUpdateTime();
+  irAdvance((irIdx+1)%irFrames.length, false);
+}
+// jump IR to a specific frame (random access) — used when scrubbing the outlook's past window
+function irGoto(k){
+  if(!irOn || k<0 || k>=irFrames.length) return;
+  if(irTimer){ clearTimeout(irTimer); irTimer=null; }
+  irPaused=true;                              // scrub takes manual control of IR
+  const el=document.getElementById('irTime'); if(el) el.classList.add('irresume');
+  const hiddenName = irVis==='A'?'B':'A', hidden = irLyr[hiddenName];
+  let shown=false;
+  const done=()=>{ if(shown||!irOn) return; shown=true;
+    map.getPane('irp'+hiddenName).style.opacity=irOpacity;
+    map.getPane('irp'+irVis).style.opacity=0;
+    irVis=hiddenName; irIdx=k;
+    const d=irFrames[irIdx], hhmm=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const el2=document.getElementById('irTime'); if(el2) el2.textContent='🛰 '+hhmm+(lang==='zh'?' 红外·点击播放':' IR · tap to play');
+  };
+  hidden.off('load'); hidden.once('load', done);
+  hidden.setUrl(irUrlFor(irFrames[k]));
+  setTimeout(done, 2500);
+}
+function irFrameForTime(ms){
+  let best=-1, bd=6*60000;   // within 6 min of a frame
+  irFrames.forEach((d,i)=>{ const diff=Math.abs(d.getTime()-ms); if(diff<bd){ bd=diff; best=i; } });
+  return best;
+}
+// when scrubbing the outlook into IR's ~2h past window, nudge IR to the matching frame
+function syncIRToHour(){
+  if(!irOn || !irFrames.length || !data) return;
+  const t=new Date(data.time[hourIdx]).getTime();
+  const k=irFrameForTime(t);
+  if(k>=0 && k!==irIdx) irGoto(k);
+}
+function toggleIR(){
+  const btn=document.getElementById('irBtn');
+  const sl=document.getElementById('irOpacity');
+  if(irOn){
+    if(irTimer){ clearTimeout(irTimer); irTimer=null; }
+    ['A','B'].forEach(n=>{ if(irLyr[n]){ try{map.removeLayer(irLyr[n]);}catch(e){} irLyr[n]=null; }
+      const p=map.getPane('irp'+n); if(p) p.style.opacity=0; });
+    irOn=false; irPaused=false; irBgStopped=false; btn.classList.remove('on');
+    const tl=document.getElementById('irTime'); tl.textContent=''; tl.classList.remove('irresume');
+    sl.style.display='none';
+    if(data) drawArrows(hourIdx);          // restore wind arrows
+    return;
+  }
+  ensureIrPanes();
+  irFrames=irTimestamps(); irIdx=irFrames.length-1; irVis='A';
+  irPaused=false; irBgStopped=false; irPlayStart=Date.now();
+  irLyr.A=irMakeLayer('A'); irLyr.A.addTo(map);
+  irLyr.B=irMakeLayer('B'); irLyr.B.addTo(map);
+  map.getPane('irpA').style.opacity=0; map.getPane('irpB').style.opacity=0;
+  irOn=true; btn.classList.add('on');
+  sl.value=Math.round(irOpacity*100); sl.style.display='';
+  if(arrowLayer) arrowLayer.clearLayers();  // hide arrows so IR is clear
+  document.getElementById('irTime').textContent = lang==='zh'?'🛰 载入中…':'🛰 loading…';
+  irAdvance(irIdx, true);                    // load & reveal newest frame first
+}
+
+function scrollToOutlook(){
+  const el=document.getElementById('timeline');
+  if(el && el.style.display!=='none'){ el.scrollIntoView({behavior:'smooth', block:'center'}); }
+  else{ window.scrollBy({top:Math.round(window.innerHeight*0.6), behavior:'smooth'}); }
+}
+
+function toggleLang(){
+  lang = lang==='zh'?'en':'zh';
+  localStorage.setItem("wa_lang",lang);
+  document.documentElement.lang = lang==='zh'?'zh':'en';
+  applyLang();
+  if(data) render();
+}
+
+function applyLang(){
+  const L=I18N[lang];
+  document.getElementById('langBtn').textContent = lang==='zh' ? '🌐 中文' : '🌐 EN';
+  document.getElementById('t-title').textContent = L.title;
+  document.getElementById('t-sub').textContent = lang==='zh'?'雷暴 · 降雨 · 强风预警':'Storm · rain · wind watch';
+  document.getElementById('t-geo').textContent = L.geo;
+  document.getElementById('t-go').textContent = L.go;
+  document.getElementById('inLat').placeholder = L.phLat;
+  document.getElementById('inLon').placeholder = L.phLon;
+  document.getElementById('t-refresh').textContent = L.refresh;
+  document.getElementById('t-wind').textContent = L.wind;
+  document.getElementById('t-rh').textContent = L.rh;
+  document.getElementById('t-pr').textContent = L.pr;
+  document.getElementById('t-tl').textContent = L.tl;
+  document.getElementById('t-exp-h').textContent = L.expH;
+  document.getElementById('exp1').innerHTML = L.exp1;
+  document.getElementById('exp2').innerHTML = L.exp2;
+  document.getElementById('exp3').innerHTML = L.exp3;
+  document.getElementById('exp-warn').innerHTML = L.warn;
+  document.getElementById('credit').innerHTML =
+    (lang==='zh' ? '数据 ' : 'Data: ')
+    + '<a href="https://www.ecmwf.int" target="_blank" rel="noopener">ECMWF IFS</a> '
+    + (lang==='zh' ? `（风 0.25° · CAPE/雨 ${SURF_RES}）` : `(winds 0.25° · CAPE/rain ${SURF_RES})`) + ' · '
+    + '<a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> '
+    + '(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>) · '
+    + (lang==='zh' ? '地形 ' : 'Terrain: ')
+    + '<a href="https://spacedata.copernicus.eu" target="_blank" rel="noopener">Copernicus DEM</a> · '
+    + (lang==='zh' ? '地图 ' : 'Map: ')
+    + '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · '
+    + '© <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> · '
+    + (lang==='zh' ? '卫星 ' : 'Satellite: ')
+    + '<a href="https://www.earthdata.nasa.gov/gibs" target="_blank" rel="noopener">NASA GIBS</a> · JMA Himawari-9';
+  // overlay toggle labels
+  document.getElementById('seg-combo').textContent = lang==='zh'?'综合':'Storm';
+  document.getElementById('seg-cvg').textContent = '925';
+  document.getElementById('seg-cvg850').textContent = '850';
+  document.getElementById('seg-mfc').textContent = 'MFC';
+  document.getElementById('seg-cape').textContent = 'CAPE';
+  document.getElementById('seg-terr').textContent = lang==='zh'?'地形':'Terrain';
+  document.getElementById('t-ir').textContent = lang==='zh'?'卫星红外':'IR satellite';
+  document.getElementById('t-loc').textContent = lang==='zh'?'地点':'Places';
+  document.getElementById('t-loc-title').textContent = lang==='zh'?'地点':'Locations';
+  document.getElementById('t-loc-save').textContent = lang==='zh'?'➕ 收藏当前位置':'➕ Save current spot';
+  document.getElementById('locSearch').placeholder = lang==='zh'?'搜索…':'Search…';
+  document.getElementById('t-conf').textContent = lang==='zh'?'集合信心':'Ensemble confidence';
+  document.getElementById('t-appr').textContent = '🌧 '+(lang==='zh'?'降雨来临':'Rain approach');
+  if(irOn) irUpdateTime();
+  // morning modal + button
+  document.getElementById('m-send').textContent = L.send;
+  document.getElementById('m-cancel').textContent = L.cancel;
+  drawLegend();
+}
+
+/* ================= ECMWF ENSEMBLE CONFIDENCE ================= */
+let ensData=null, ensSig=null, confShown=false;
+async function fetchEnsemble(){
+  const sig=center.lat.toFixed(3)+','+center.lon.toFixed(3);
+  if(ensSig===sig && ensData) return ensData;
+  const url=`https://ensemble-api.open-meteo.com/v1/ensemble`
+    +`?latitude=${center.lat.toFixed(4)}&longitude=${center.lon.toFixed(4)}`
+    +`&hourly=relative_humidity_2m,cape&models=${ENSEMBLE.model}&forecast_days=3&timezone=auto`;
+  const res=await fetch(url); if(!res.ok) throw new Error("ens HTTP "+res.status);
+  const json=await res.json();
+  const h = Array.isArray(json) ? (json[0]&&json[0].hourly) : json.hourly;
+  if(!h || !h.relative_humidity_2m) throw new Error("ensemble fields unavailable");
+  const M=1+Object.keys(h).filter(k=>/^relative_humidity_2m_member\d+$/.test(k)).length;
+  ensData={hourly:h, members:M, time:h.time}; ensSig=sig;
+  return ensData;
+}
+// member agreement on the storm ENVIRONMENT (moisture + instability) at hour hr
+function computeConfidence(hr){
+  if(!ensData) return null;
+  const h=ensData.hourly, M=ensData.members;
+  const mv=(base,m)=>{ const k=m===0?base:base+'_member'+m; const a=h[k]; return (a&&a[hr]!=null)?a[hr]:null; };
+  let valid=0, fav=0, moistY=0, instY=0;
+  for(let m=0;m<M;m++){
+    const rh=mv('relative_humidity_2m',m), cape=mv('cape',m);
+    if(rh==null||cape==null) continue;
+    valid++;
+    const moist=rh>=ING.rhOn, inst=cape>=ING.capeOn;
+    if(moist)moistY++; if(inst)instY++; if(moist&&inst)fav++;
+  }
+  if(!valid) return null;
+  const p=(n)=>Math.round(n/valid*100);
+  return { members:valid, favorable:fav, pctFav:p(fav), pctMoist:p(moistY), pctInst:p(instY) };
+}
+function loadConfidence(){
+  if(!data) return;
+  const body=document.getElementById('confBody');
+  body.innerHTML='<span class="spin"></span> '+(lang==='zh'?'读取集合…':'loading ensemble…');
+  fetchEnsemble().then(()=>{ confShown=true; renderConfidence(); })
+    .catch(e=>{ confShown=false; body.innerHTML='<span style="color:var(--warn)">'+(lang==='zh'?'集合数据不可用':'ensemble data unavailable')+' <span style="opacity:.7;font-size:11px">('+(e&&e.message?e.message:'error')+')</span></span>'; });
+}
+function renderConfidence(){
+  if(!confShown || !ensData) return;
+  const c=computeConfidence(hourIdx), body=document.getElementById('confBody'), V=I18N[lang].conf;
+  if(!c){ body.innerHTML='<span style="color:var(--muted)">'+(lang==='zh'?'无有效成员':'no valid members')+'</span>'; return; }
+  const col=c.pctFav>=66?'var(--bad)':c.pctFav>=33?'var(--warn)':'var(--muted)';
+  const bar=(lab,pct,bc)=>`<div class="confrow"><span class="cflab">${lab}</span><span class="cfbarwrap"><span class="cfbar" style="width:${pct}%;background:${bc}"></span></span><b class="cfpct">${pct}%</b></div>`;
+  body.innerHTML =
+    `<div class="confhead" style="color:${col}">${V.overall}: ${c.pctFav}% <span class="cfsub">(${c.favorable}/${c.members} ${V.members})</span></div>`
+    + bar(V.moist, c.pctMoist, 'var(--div)')
+    + bar(V.inst, c.pctInst, 'var(--cvg3)')
+    + `<div class="cfnote">${V.note}</div>`;
+}
+
+/* ================= SHARE ================= */
+// verdict label + count/reason suffix (shared by banner and share sheet)
+function verdictText(ing){
+  const v=verdictOf(ing.level);
+  const S=I18N[lang].ingShort, N=I18N[lang].note;
+  const n=(ing.liftOk?1:0)+(ing.moistOk?1:0)+(ing.instOk?1:0);
+  const missing=[];
+  if(!ing.liftOk)  missing.push(S.lift);
+  if(!ing.moistOk) missing.push(S.moist);
+  if(!ing.instOk)  missing.push(S.inst);
+  let suffix="";
+  if(ing.level>=1){
+    const cnt=`(${n}/3)`;
+    if(missing.length) suffix=` · ${lang==='zh'?missing.join('、')+S.short:S.short+' '+missing.join(', ')} ${cnt}`;
+    else if(ing.level===4) suffix=` · ${N.all} ${cnt}`;
+    else{ const r=!ing.liftStrong?N.weakLift:N.mod; suffix=` · ${N.present}${N.sep}${r} ${cnt}`; }
+  }
+  return {label:v.label, full:v.label+suffix, col:v.col, txt:v.txt};
+}
+
+// short phrase for today's daytime (06–21) storm window
+function todayWindow(){
+  const M=I18N[lang].morn;
+  const now=new Date(),ty=now.getFullYear(),tm=now.getMonth(),td=now.getDate();
+  const marks=[];
+  data.time.forEach((t,i)=>{ const d=new Date(t);
+    if(d.getFullYear()===ty&&d.getMonth()===tm&&d.getDate()===td&&d.getHours()>=6&&d.getHours()<=21){
+      const ing=stormIngredients(i); marks.push({h:d.getHours(), lvl:ing.level}); }
+  });
+  if(!marks.length) return M.nodata;
+  const storm=marks.filter(m=>m.lvl>=3);
+  const hh=x=>String(x).padStart(2,'0')+":00";
+  if(storm.length){
+    const s0=storm[0].h, s1=storm[storm.length-1].h;
+    const peak=Math.max(...storm.map(m=>m.lvl));
+    const win=s0===s1?hh(s0):`${hh(s0)}–${hh(s1)}`;
+    return `${M.head} ${win} — ${peak>=4?M.likely:M.watch}`;
+  }
+  return marks.some(m=>m.lvl===1)?M.upliftOnly:M.lowrisk;
+}
+
+// full editable WhatsApp message: current reading + today's window
+function shareRainText(){
+  if(!data) return '';
+  const nowIdx=nearestHourIndex(data.time);
+  const A=computeApproach(nowIdx); if(!A) return '';
+  const P=I18N[lang].appr;
+  const fmt=idx=>String(new Date(data.time[idx]).getHours()).padStart(2,'0')+':00';
+  let head='';
+  if(A.rainingHere) head=`🌧 ${P.here}`;
+  else if(A.eta!=null){ const inN=A.eta-nowIdx; head=`🌧 ${P.reaching}${fmt(A.eta)}${inN>0?` (${inN}${P.hAbbr})`:''}`; }
+  else return '';   // no rain reaching your point → nothing to broadcast
+  let out='\n\n'+head;
+  if(A.wetHours && A.wetHours.length){
+    const items=A.wetHours.map(o=>{ const rr=o.r<1?o.r.toFixed(1):Math.round(o.r); return `${fmt(o.h)}·${rr}`; }).join(' ');
+    out+=`\n${items} mm/h · ${rainLevel(A.peak)}`;
+  }
+  if(A.endsAt!=null){ const inN=A.endsAt-nowIdx; const lab=A.intermittent?P.onoff:P.cont;
+    out+=`\n${lab}${fmt(A.endsAt)}${inN>0?` (${inN}${P.hAbbr})`:''}`; }
+  return out;
+}
+function buildShareText(){
+  const L=I18N[lang];
+  const C=convergenceField(hourIdx);
+  const cc=C[CENTER][CENTER]; const cat=categoryOf(cc);
+  const g=data.grid.find(x=>x.i===CENTER&&x.j===CENTER);
+  const ing=stormIngredients(hourIdx); const vt=verdictText(ing);
+  const loc=center.name?(lang==='zh'?center.name.zh:center.name.en):`${center.lat.toFixed(3)},${center.lon.toFixed(3)}`;
+  const val=(cc>0?'+':'')+(cc*1e5).toFixed(1)+"×10⁻⁵ s⁻¹";
+  const capeTxt=ing.capeUnknown?"—":Math.round(ing.cape)+" J/kg";
+  const mark=b=>b?"✅":"⬜";
+  const dd=String(new Date().getDate()).padStart(2,'0'), mmn=String(new Date().getMonth()+1).padStart(2,'0');
+  const todayLab=(lang==='zh'?'今日':'Today')+` (${dd}/${mmn})`;
+  const mfcTxt=(ing.mfc>0?'+':'')+ing.mfc.toFixed(1)+" g/kg·h";
+  const ascTxt=(ing.ascent>0?'+':'')+ing.ascent.toFixed(0)+" cm/s";
+  const depthTxt = ing.depth==='deep'?I18N[lang].depth.deep : ing.depth==='shallow'?I18N[lang].depth.shallow : '—';
+  const surgeLine = ing.surge ? `\n🌊 ${I18N[lang].surge}: ${ing.sp850.toFixed(0)} m/s ${dirArrow(ing.dr850)}` : '';
+  const oroLine = ing.upslope ? `\n🏔️ ${I18N[lang].upslope}: +${ing.oro.toFixed(0)} cm/s` : '';
+  return `${L.waHead} · ${loc}
+${L.waTime}: ${baseTimeLabel}
+
+${vt.full}
+
+${L.waConv}: ${val} (${cat.label}) · ${depthTxt}
+${mark(ing.liftOk)} ${L.ing.lift}
+${mark(ing.moistOk)} ${L.ing.moist}: ${Math.round(ing.rh)}%
+${mark(ing.instOk)} ${L.ing.inst}: ${capeTxt}
+${L.waMfc}: ${mfcTxt} · ${L.waAsc}: ${ascTxt}${surgeLine}${oroLine}
+${L.waWind}: ${g.sp925[hourIdx].toFixed(1)} m/s ${dirArrow(g.dr925[hourIdx])}${shareRainText()}
+
+${todayLab}: ${todayWindow()}
+
+${L.waTip}`;
+}
+
+function openShare(){
+  if(!data){ toast(lang==='zh'?"暂无数据":"No data yet"); return; }
+  document.getElementById('shareText').value = buildShareText();
+  document.getElementById('m-title').textContent = I18N[lang].shareTitle;
+  document.getElementById('m-note').textContent = I18N[lang].shareNote;
+  document.getElementById('shareModal').classList.add('show');
+}
+function closeShare(){ document.getElementById('shareModal').classList.remove('show'); }
+function sendShare(){
+  const t=document.getElementById('shareText').value;
+  window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank");
+  closeShare();
+}
+
+function fmtTime(t){
+  const days=lang==='zh'?['周日','周一','周二','周三','周四','周五','周六']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const now=new Date(); const sameDay=t.toDateString()===now.toDateString();
+  const hh=String(t.getHours()).padStart(2,'0');
+  return (sameDay?(lang==='zh'?'今天':'Today'):days[t.getDay()])+" "+hh+":00";
+}
+function setStatus(spin,msg){
+  document.getElementById('status').innerHTML = (spin?'<span class="spin"></span>':'')+(msg||'');
+}
+let toastT;
+function toast(m){ const el=document.getElementById('toast'); el.textContent=m; el.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),2200); }
+
+window.addEventListener('resize',()=>{ if(map){ map.invalidateSize(); } if(data) drawSpark(); });
+
+/* ================= OFFLINE SHELL (inline SW) ================= */
+function registerSW(){
+  if(!('serviceWorker' in navigator)) return;
+  let hadController = !!navigator.serviceWorker.controller;
+  let refreshing = false;
+  // When a newly-deployed SW takes control, reload once to the fresh version.
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+    if(refreshing) return;
+    if(!hadController){ hadController = true; return; }   // ignore the first-ever install claim
+    refreshing = true;
+    window.location.reload();
+  });
+  navigator.serviceWorker.register('./sw.js').then(reg=>{
+    // Standalone PWAs may resume without navigating — check for updates on focus.
+    document.addEventListener('visibilitychange', ()=>{
+      if(document.visibilityState==='visible') reg.update().catch(()=>{});
+    });
+  }).catch(()=>{});
+}
+
+/* ================= BOOT ================= */
+function setupSpark(){
+  const cv=document.getElementById('spark');
+  if(!cv) return;
+  let dragging=false;
+  const seek=clientX=>{
+    if(!data) return;
+    const rect=cv.getBoundingClientRect();
+    const frac=Math.max(0,Math.min(1,(clientX-rect.left-3)/(rect.width-6)));
+    const h=Math.round(frac*(data.hours-1));
+    if(h!==hourIdx){ hourIdx=h; document.getElementById('hourSlider').value=hourIdx; render(); syncIRToHour(); }
+  };
+  cv.addEventListener('pointerdown',e=>{ dragging=true; try{cv.setPointerCapture(e.pointerId);}catch(x){} seek(e.clientX); e.preventDefault(); });
+  cv.addEventListener('pointermove',e=>{ if(dragging) seek(e.clientX); });
+  cv.addEventListener('pointerup',()=>{ dragging=false; });
+  cv.addEventListener('pointercancel',()=>{ dragging=false; });
+}
+
+document.documentElement.lang = lang==='zh'?'zh':'en';
+applyLang();
+initMap();
+syncFields();
+setupSpark();
+// Pause the IR loop while the app is backgrounded (battery/data); resume on return.
+document.addEventListener('visibilitychange', ()=>{
+  if(!irOn) return;
+  if(document.hidden){
+    if(!irPaused && irTimer){ clearTimeout(irTimer); irTimer=null; irBgStopped=true; }
+  } else if(irBgStopped && !irPaused){
+    irBgStopped=false; irPlayStart=Date.now(); irAdvance((irIdx+1)%irFrames.length,false);
+  }
+});
+const cached=loadCache(); // show something instantly if offline
+loadData();
+registerSW();
+</script>
+</body>
+</html>
