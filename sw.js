@@ -1,6 +1,6 @@
 /* Wind Accumulation — service worker
    Bump CACHE on every release so clients pick up the new shell. */
-const CACHE = 'windaccum-20260719-87';
+const CACHE = 'windaccum-20260719-88';
 const SHELL = [
   './',
   './index.html',
