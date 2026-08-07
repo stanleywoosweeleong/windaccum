@@ -158,6 +158,8 @@ input[type=range]{width:100%;margin:8px 0 2px;accent-color:var(--accent)}
 .irrow{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
 .irbtn{font-size:12.5px;padding:7px 12px}
 .irbtn.on{background:var(--accent);color:#231400;border-color:var(--accent)}
+.isolabel{font-family:var(--mono);font-size:10.5px;font-weight:700;color:#d7c6f2;
+  text-shadow:0 0 3px #0a1521,0 0 3px #0a1521,0 0 2px #0a1521;white-space:nowrap;pointer-events:none}
 .irtime{font-size:12px;color:var(--muted);font-family:var(--mono)}
 .irtime.irresume{color:var(--accent);cursor:pointer;font-weight:700}
 .iropacity{flex:1;min-width:110px;accent-color:var(--accent)}
@@ -196,9 +198,10 @@ input[type=range]{width:100%;margin:8px 0 2px;accent-color:var(--accent)}
 .locdel{flex:0 0 38px;background:var(--panel2);border:1px solid var(--line);color:#f87171;border-radius:9px;font-size:13px;cursor:pointer}
 .locpurge{width:100%;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.4);color:#f87171;border-radius:9px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;margin:4px 0 8px}
 .locempty{color:var(--muted);text-align:center;padding:24px;font-size:13px}
-#wtoast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(12px);background:#0d1a2c;border:1px solid var(--line);color:var(--ink);
+/* (#wtoast removed with the duplicate toast() it belonged to — .toast below is the live one) */
+#wtoast-removed{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(12px);background:#0d1a2c;border:1px solid var(--line);color:var(--ink);
   padding:9px 16px;border-radius:999px;font-size:13px;z-index:1400;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;box-shadow:0 6px 20px rgba(0,0,0,.4)}
-#wtoast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#wtoast-removed.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .legend .sw{width:26px;height:14px;border-radius:3px;display:inline-block;border:1px solid rgba(255,255,255,.35);box-shadow:0 1px 2px rgba(0,0,0,.4)}
 .legend .grp{display:flex;align-items:center;gap:5px;margin-right:12px}
 
@@ -308,6 +311,7 @@ details[open] summary::after{content:"－"}
   <div class="irrow">
     <button class="btn irbtn" id="irBtn" onclick="toggleIR()">🛰 <span id="t-ir">卫星红外</span></button>
     <button class="btn irbtn" id="locBtn" onclick="openLocs()">📍 <span id="t-loc">地点</span></button>
+    <button class="btn irbtn" id="isoBtn" onclick="toggleIso()">〰 <span id="t-iso">等压线</span></button>
     <button class="btn irbtn on" id="seedBtn" onclick="toggleSeeds()" title="markers">★</button>
     <span class="irtime" id="irTime" onclick="irResume()"></span>
     <input type="range" id="irOpacity" class="iropacity" min="15" max="100" value="60" oninput="setIrOpacity(this.value)" style="display:none">
@@ -339,6 +343,7 @@ details[open] summary::after{content:"－"}
       <span><b id="r-wind">—</b> <span id="t-wind">风</span></span>
       <span><b id="r-rh">—</b> <span id="t-rh">湿度</span> <b id="r-rh-cat" class="mcat"></b></span>
       <span><b id="r-pr">—</b> <span id="t-pr">降水</span> <b id="r-pr-cat" class="mcat"></b></span>
+      <span id="r-mslp-wrap" style="display:none"><b id="r-mslp">—</b> <span id="t-mslp">海平面气压</span> <b id="r-mslp-chg" class="mcat"></b></span>
     </div>
   </div>
 
@@ -358,6 +363,8 @@ details[open] summary::after{content:"－"}
       <p id="exp1"></p>
       <p id="exp2"></p>
       <p id="exp3"></p>
+      <p id="exp-iso"></p>
+      <p id="exp-tz" style="color:var(--muted)"></p>
       <div class="warnbox" id="exp-warn"></div>
       <div class="qrbox">
         <a href="https://stanleywoosweeleong.github.io/windaccum/" target="_blank" rel="noopener" aria-label="Open app">
@@ -453,6 +460,31 @@ const TRANSPARENT_PX='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAA
 const IR_SATMIN=0.10, IR_SATFULL=0.45;
 // ECMWF ensemble (ENS, 51 members, 0.25°) for forecast confidence — on-demand, pure ECMWF
 const ENSEMBLE = { model:'ecmwf_ifs025_ensemble', spacing:0.20 };
+/* ---- ISOBARS (ported from 风眼 TyphoonWatch) -------------------------------
+   The convergence grid is deliberately tiny (1.6°, ~180 km) because convergence is
+   a farm-scale quantity. Sea-level pressure is not: across 180 km the tropical MSLP
+   field varies by well under 1 hPa, so contouring the SAME grid would draw nothing
+   on most days and noise on the rest. The isobar layer therefore gets its OWN wider,
+   coarser grid — 13x13 at 0.5° = a 6° box (~660 km), the scale a monsoon surge or a
+   Borneo vortex actually lives at.
+   cell_selection=nearest matters here: the API default 'land' snaps each request to
+   a land grid-cell, which over the South China Sea would bend the contours toward
+   the coast. We want the true field, sea cells included. */
+const ISO = {
+  n:13, spacing:0.5,
+  /* Interval ladder. The layer ANCHORS on 1 hPa — TyphoonWatch's settled choice —
+     and only moves off it when the field forces it: finer if 1 hPa draws fewer than
+     minLines contours (the usual quiet-day case here), coarser if it would draw more
+     than maxLines. The coarse end is not decoration: a tropical cyclone inside the
+     box gives a 40+ hPa range, and 1 hPa would then render ~50 fused rings. Stepping
+     up to 4 hPa is exactly what a real surface chart does with the same field.
+     maxLines also contains the damage from a single wild grid value. */
+  steps:[0.25, 0.5, 1, 2, 4, 5, 10], base:1,
+  minLines:3, maxLines:14,
+  color:'#a78bd0',          // violet — the same ink TyphoonWatch uses for isobars
+  casing:'#0b1424',
+  weight:1.15, casingWeight:3.4
+};
 // Rain-approach tracker: model precipitation threshold (mm/h) and look-ahead for the trend
 // Rain-approach tracker: model precip threshold (mm/h). 0.7 = "noticeable rain" floor for Malaysia
 // (below ~0.7 mm/h, trace precip rarely registers on the ground in heavy tropical evaporation).
@@ -577,6 +609,40 @@ const ING = {
   capeOn:500, capeStrong:2000  // instability, J/kg
 };
 
+/* ================= MALAYSIA STANDARD TIME =================================
+   Every clock in this app reads MYT, whatever the device is set to and wherever
+   the pin has been dropped. Two reasons, and the second is the important one:
+
+   1. `timezone=auto` returned the FORECAST LOCATION's local time. Click across the
+      Strait to Sumatra or north into Thailand and the rows silently became UTC+7,
+      still labelled as if they were the reader's own hours.
+   2. The forecast rows and the IR satellite clock were on DIFFERENT clocks. Rows
+      came from naive strings parsed by the browser as device-local; the IR clock
+      came from a real Date rendered with toLocaleTimeString, also device-local but
+      of a genuine instant. Those two agree only when the device zone and the pin's
+      zone are the same. One screen, two clocks, no label on either.
+
+   Malaysia keeps UTC+8 all year and has no daylight saving, so a fixed offset is
+   exact rather than an approximation — the same reasoning 风眼 TyphoonWatch uses in
+   its myt() helper. The API is asked for Asia/Kuala_Lumpur, and the naive strings
+   it returns are read with getUTC* after a "Z" is appended, which keeps the
+   rendering independent of the device clock. ======================================= */
+const TZ = 'Asia/Kuala_Lumpur';
+const MYT_MS = 8*36e5;
+// naive MYT string ("2026-08-07T15:00") -> the real instant it denotes
+function mytMs(s){ const v=Date.parse(s+"Z"); return isFinite(v)?v-MYT_MS:NaN; }
+// a real instant -> a Date whose getUTC* accessors read as MYT wall clock
+function mytDate(ms){ return new Date(ms+MYT_MS); }
+const p2 = x => String(x).padStart(2,'0');
+// "15:00" from a naive MYT forecast stamp — no device zone involved
+function mytHH(s){ return p2(new Date(Date.parse(s+"Z")).getUTCHours())+':00'; }
+function mytHour(s){ return new Date(Date.parse(s+"Z")).getUTCHours(); }
+// "15:40" from a real instant (used for the satellite frames)
+function mytClock(ms){ const d=mytDate(ms); return p2(d.getUTCHours())+':'+p2(d.getUTCMinutes()); }
+// "2026-08-07" — the naive MYT stamp already carries the MYT calendar date
+function mytDay(s){ return String(s).slice(0,10); }
+function mytToday(){ return mytDate(Date.now()).toISOString().slice(0,10); }
+
 // Default view coordinate (no named seeds — user sets via GPS or manual entry)
 const DEFAULT_CENTER = { lat:3.155, lon:102.400 };
 
@@ -586,7 +652,7 @@ const I18N = {
     title:"风的累积", sub:"WIND ACCUMULATION · CONVERGENCE MONITOR",
     tag:"925 hPa 边界层风辐合 · MFC · ECMWF IFS 0.25°",
     geo:"当前位置", go:"查看", phLat:"纬度 3.155", phLon:"经度 102.400", refresh:"更新", wind:"925 风", rh:"MFC g/kg·h", pr:"上升* cm/s",
-    tl:"48h 辐合 · 点击或拖动", share:"分享到 WhatsApp",
+    tl:"48h 辐合 · 点击或拖动 · 马时", share:"分享到 WhatsApp",
     shareTitle:"分享到 WhatsApp", shareNote:"可编辑后发送 · 供每日晨间广播使用", send:"发送", cancel:"取消",
     expH:"什么是风的累积？",
     langNext:"EN",
@@ -596,8 +662,18 @@ const I18N = {
     bands:{ weak:"弱", mod:"中", strong:"强", dry:"发散", sink:"下沉" },
     depth:{ deep:"深层辐合", shallow:"浅层" },
     surge:"季风涌", upslope:"迎风坡抬升",
+    iso:"等压线", mslp:"海平面气压", mslp24:"未来24h",
+    myt:"马时", tzNote:"所有时间均为马来西亚标准时间 MYT (UTC+8)。",
+    offlineMoved:"已回到缓存的地点 {lat}, {lon}",
+    cacheAgeMin:"{n} 分钟前", cacheAgeHr:"{n} 小时前", cacheAgeDay:"{n} 天前",
+    isoLegend:"海平面气压 · 间隔 {s} hPa", isoBox:"范围 {d}° ≈ {km} 公里",
+    isoFlat:"气压场过于平坦，0.25 hPa 间隔仍无等压线",
+    isoLoading:"正读取气压场…", isoFail:"气压场读取失败",
+    isoHour:"此时段无气压数据", isoGap:"{n} 个格点中 {m} 个缺失",
     conf:{ overall:"环境信心", members:"成员支持", lift:"抬升", moist:"水汽", inst:"不稳定",
-      note:"ECMWF 集合最多 51 成员 (0.25°) 对水汽＋不稳定环境的一致度 · 高＝各成员大多认同大气已就绪。触发（抬升）见上方确定性预报。仅供参考。" },
+      note:"ECMWF 集合最多 51 成员 (0.25°) 对水汽＋不稳定环境的一致度 · 湿度取 925 hPa，与上方确定性预报同一高度 · 高＝各成员大多认同大气已就绪。触发（抬升）见上方确定性预报。仅供参考。",
+      note2m:"ECMWF 集合最多 51 成员 (0.25°) 对水汽＋不稳定环境的一致度 · ⚠ 本次未提供 925 hPa 湿度，改用 <b>2 米湿度</b>：热带地面湿度系统性偏高，故此栏会比上方判定乐观。触发（抬升）见上方确定性预报。仅供参考。",
+      uncovered:"集合预报未覆盖此时段" },
     appr:{ title:"降雨来临", here:"模式预报你现在的位置会下雨", reaching:"预计降雨到达 约", onoff:"模式：间歇阵雨至 约", cont:"模式：持续雨至 约", hAbbr:"小时后",
       nearest:"最近降雨", approach:"正在靠近 ↓", recede:"正在远离 ↑", steady:"距离稳定",
       notReach:"预计不会到达你的位置。", none:"你的范围内暂无降雨。",
@@ -617,12 +693,13 @@ const I18N = {
     exp1:"马来西亚气象局常说「小心风的累积」，但很少说明。它指的是<b>低层风辐合</b>——不同方向的风汇聚在一起，空气被挤压，无处可去只能上升。",
     exp2:"上升的湿空气冷却、凝结，形成积雨云，带来<b>雷暴、骤雨和骤发水灾</b>。但辐合只是<b>触发</b>——还需要<b>水汽</b>（湿度）和<b>不稳定</b>（CAPE 对流有效位能）。缺一不可，风暴才会真正形成。本工具会门控警报：只有当大气能把抬升转化为风暴时才「喊」。",
     exp3:"本工具用 <b>925 hPa 边界层风</b>（非 10 米地面风）计算辐合：<code>累积 = −(∂u/∂x + ∂v/∂y)</code>。并计算 <b>水汽通量辐合 MFC = −∇·(qV)</b>（水汽＋辐合的对流触发指标），以及由辐合按质量连续推算的<b>上升速度*</b>（w ≈ 辐合 × 边界层厚度）。数据来自 <b>ECMWF IFS</b>（风/温/湿 0.25°；CAPE 与降水取自更精细的 HRES 9km）；此模式在 Open-Meteo 不提供气压层垂直速度，故上升为推算值（标 *）。同时比较 <b>925 与 850 hPa</b> 辐合：两层皆辐合＝<b>深层辐合</b>（信号更可靠）；仅 925＝浅层。850 hPa 强劲东北风则标示 <b>季风涌</b>（东北季风期强降雨/水灾前兆）。此外结合地形（Copernicus DEM 90m）计算 <b>地形抬升 w≈V·∇z</b>：风吹向高地即迎风坡强迫抬升，与辐合叠加时风暴更易发生。<b>卫星红外</b>（Himawari-9 B13）动画显示云顶温度：越冷＝云越高＝对流越深；逐帧变冷＝风暴正在增强（约延迟 40 分钟）。",
+    expIso:"<b>等压线（〰 按钮）</b>另取一张更大更疏的网格：13×13、间隔 0.5°，即约 6°（660 公里）见方。辐合是农场尺度的量，所以主网格只有 1.6°；但海平面气压不是——在 180 公里内热带气压变化远不到 1 hPa，用同一张网格画等压线，大多数日子什么都画不出来。这一层直接绘制 ECMWF 的海平面气压场，<b>不命名任何低压、不判定任何环流、不标注中心</b>：闭合的等压线由你自己判读。两点须知。其一，热带气压梯度松散：中纬度天气图用 4 hPa 间隔，在马来西亚会是一张白纸，所以本层从 1 hPa 起，场更平坦时自动降到 0.5 或 0.25 hPa，并<b>始终在图例标出所用间隔</b>；若 0.25 hPa 仍找不到线，它会直说，而不是硬画一个并不存在的形状。其二，半日大气潮每天两次使热带海压上下摆动约 ±1.5 hPa，且在 6° 范围内几乎是整体同升同降——所以<b>数字会随时间呼吸，形状却几乎不动</b>。请读图案与疏密，不要把「下午 1006、上午 1008」读成低压填塞。取点用 cell_selection=nearest，海面格点不会被拉到陆地上。",
     warn:"⚠ 数据诚实声明：本工具使用 10 米地面风的粗网格估算，是<b>指示性</b>参考，非气象局的中尺度分析。请始终以官方警报为准。数值为量级估计，非精确诊断。",
     now:"现在", loading:"读取风场中…", offline:"离线 — 显示上次缓存", failed:"读取失败，请检查网络",
     tapmove:"点击地图可移动中心点", shared:"已复制分享文字",
     waHead:"🌬️ 风的累积监测", waConv:"925 辐合", waCat:"等级", waWind:"925 风", waLoc:"地点", waTime:"时间",
     waMfc:"水汽通量辐合", waAsc:"上升*",
-    waTip:"（925 hPa 边界层辐合 · MFC＝水汽通量辐合 · 上升*由辐合推算。ECMWF IFS 0.25° · Open-Meteo。仅供参考，以气象局警报为准。）",
+    waTip:"（925 hPa 边界层辐合 · MFC＝水汽通量辐合 · 上升*由辐合推算。所有时间均为马来西亚标准时间 MYT (UTC+8)。ECMWF IFS 0.25° · Open-Meteo。仅供参考，以气象局警报为准。）",
     morn:{
       btn:"早报", title:"早报文字 · 今日风暴", copy:"复制", copied:"已复制",
       note:"可编辑后复制或分享 · 供每日晨间广播使用",
@@ -637,7 +714,7 @@ const I18N = {
     title:"Wind Accumulation", sub:"低层风辐合监测 · CONVERGENCE MONITOR",
     tag:"925 hPa boundary-layer convergence · MFC · ECMWF IFS 0.25°",
     geo:"Current location", go:"Go", phLat:"Latitude 3.155", phLon:"Longitude 102.400", refresh:"Refresh", wind:"925 wind", rh:"MFC g/kg·h", pr:"ascent* cm/s",
-    tl:"48h outlook · tap or drag", share:"Share to WhatsApp",
+    tl:"48h outlook · tap or drag · MYT", share:"Share to WhatsApp",
     shareTitle:"Share to WhatsApp", shareNote:"Edit, then send · for your daily morning broadcast", send:"Send", cancel:"Cancel",
     expH:"What is wind accumulation?",
     langNext:"中",
@@ -648,7 +725,9 @@ const I18N = {
     depth:{ deep:"deep convergence", shallow:"shallow" },
     surge:"Monsoon surge", upslope:"Upslope lift",
     conf:{ overall:"Environment confidence", members:"members favour", lift:"Lift", moist:"Moisture", inst:"Instability",
-      note:"Agreement across ECMWF ensemble (up to 51 members, 0.25°) on a moist + unstable environment · high = members mostly concur the atmosphere is primed. The trigger (lift) is the deterministic forecast above. Indicative." },
+      note:"Agreement across ECMWF ensemble (up to 51 members, 0.25°) on a moist + unstable environment · humidity is read at 925 hPa, the same level as the deterministic forecast above · high = members mostly concur the atmosphere is primed. The trigger (lift) is the deterministic forecast above. Indicative.",
+      note2m:"Agreement across ECMWF ensemble (up to 51 members, 0.25°) on a moist + unstable environment · ⚠ 925 hPa humidity was not returned this run, so <b>2 m humidity</b> was used instead — near-surface humidity runs systematically higher in the tropics, so this bar reads optimistic against the verdict above. The trigger (lift) is the deterministic forecast above. Indicative.",
+      uncovered:"The ensemble forecast does not reach this hour" },
     appr:{ title:"Rain approach", here:"Model expects rain at your location", reaching:"Rain reaching you ~", onoff:"Model: on/off showers till ~", cont:"Model: steady rain till ~", hAbbr:"h",
       nearest:"Nearest rain", approach:"approaching ↓", recede:"moving away ↑", steady:"holding distance",
       notReach:"Not forecast to reach your point.", none:"No rain in your area right now.",
@@ -665,15 +744,24 @@ const I18N = {
       calm:"Calm — no real build-up"
     },
     note:{ all:"all present", present:"all present", weakLift:"lift still weak", mod:"moderate strength", sep:", " },
+    iso:"Isobars", mslp:"MSLP", mslp24:"next 24h",
+    myt:"MYT", tzNote:"All times are Malaysia Standard Time MYT (UTC+8).",
+    offlineMoved:"view moved back to the cached place {lat}, {lon}",
+    cacheAgeMin:"{n} min old", cacheAgeHr:"{n} h old", cacheAgeDay:"{n} days old",
+    isoLegend:"Sea-level pressure · {s} hPa interval", isoBox:"box {d}° ≈ {km} km",
+    isoFlat:"Pressure field too flat to contour, even at 0.25 hPa",
+    isoLoading:"Reading pressure field…", isoFail:"Pressure field failed to load",
+    isoHour:"No pressure data for this hour", isoGap:"{m} of {n} grid points missing",
     exp1:"MetMalaysia often warns to \"beware of wind accumulation\" but rarely explains it. It means <b>low-level wind convergence</b> — winds from different directions meeting, so air piles up and has nowhere to go but up.",
     exp2:"That rising moist air cools, condenses and builds cumulonimbus, bringing <b>thunderstorms, downpours and flash floods</b>. But convergence is only the <b>trigger</b> — a storm also needs <b>moisture</b> (humidity) and <b>instability</b> (CAPE). Only when all three line up does it actually fire. This tool gates the alert: it stays quiet unless the atmosphere can convert the uplift into a storm.",
     exp3:"This tool uses <b>925 hPa boundary-layer wind</b> (not 10 m surface wind) for convergence: <code>accumulation = −(∂u/∂x + ∂v/∂y)</code>. It also computes <b>moisture-flux convergence MFC = −∇·(qV)</b> (the moisture+convergence initiation index) and a <b>continuity-derived ascent*</b> (w ≈ convergence × boundary-layer depth). Data is <b>ECMWF IFS</b> (winds/T/RH at 0.25°; CAPE and precipitation from the finer HRES 9 km); that model doesn't expose pressure-level vertical velocity on Open-Meteo, so ascent is derived (marked *). It also compares <b>925 vs 850 hPa</b> convergence: converging at both = <b>deep convergence</b> (a more reliable signal); 925-only = shallow. Strong NE 850 hPa flow flags a <b>monsoon surge</b> (a heavy-rain/flood precursor in the NE monsoon). It also uses terrain (Copernicus DEM 90 m) to compute <b>orographic lift w≈V·∇z</b>: wind blowing toward higher ground is forced upslope, and combined with convergence makes storms more likely. The <b>IR satellite</b> loop (Himawari-9 B13) shows cloud-top temperature: colder = taller cloud = deeper convection; tops cooling frame-to-frame = a storm actively deepening (~40 min delayed).",
+    expIso:"<b>Isobars (the 〰 button)</b> use a second, wider, coarser grid: 13×13 at 0.5° spacing, a box about 6° (660 km) across. Convergence is a farm-scale quantity, which is why the main grid is only 1.6° — but sea-level pressure is not. Across 180 km the tropical MSLP field varies by well under 1 hPa, so contouring the same grid would draw nothing on most days. This layer plots the ECMWF mean-sea-level pressure field and nothing else: <b>no low is named, no circulation is classified, no centre is marked</b>. A closed contour is yours to read. Two things to hold in mind. First, tropical pressure gradients are slack — a mid-latitude chart draws 4 hPa isobars, which over Malaysia gives you a blank map, so this layer starts at 1 hPa and drops to 0.5 or 0.25 when the field is flatter, and <b>always prints the interval it chose in the legend</b>; if even 0.25 hPa finds nothing it says so rather than drawing a shape that is not there. Second, the semidiurnal atmospheric tide swings tropical MSLP by roughly ±1.5 hPa twice a day, and across a 6° box it does so almost uniformly — so <b>the labels breathe while the shape barely moves</b>. Read the pattern and the spacing; don\u2019t read \u201c1006 at 4pm, 1008 at 10am\u201d as a low filling in. Points are sampled with cell_selection=nearest, so sea grid-cells are not snapped to land.",
     warn:"⚠ Data-honesty note: this uses a coarse grid of 10 m surface wind and is an <b>indicative</b> estimate, not MetMalaysia's mesoscale analysis. Always defer to official warnings. Values are order-of-magnitude, not exact diagnostics.",
     now:"now", loading:"Reading wind field…", offline:"Offline — showing last cached", failed:"Fetch failed, check connection",
     tapmove:"Tap the map to move the centre point", shared:"Share text copied",
     waHead:"🌬️ Wind Accumulation Monitor", waConv:"925 Conv", waCat:"Level", waWind:"925 wind", waLoc:"Place", waTime:"Time",
     waMfc:"Moisture-flux conv", waAsc:"Ascent*",
-    waTip:"(925 hPa boundary-layer convergence · MFC = moisture-flux convergence · ascent* derived from convergence. ECMWF IFS 0.25° · Open-Meteo. Indicative only; defer to MetMalaysia warnings.)",
+    waTip:"(925 hPa boundary-layer convergence · MFC = moisture-flux convergence · ascent* derived from convergence. All times are Malaysia Standard Time MYT (UTC+8). ECMWF IFS 0.25° · Open-Meteo. Indicative only; defer to MetMalaysia warnings.)",
     morn:{
       btn:"Morning", title:"Morning line · today's storms", copy:"Copy", copied:"Copied",
       note:"Edit, then copy or share · for your daily morning broadcast",
@@ -694,6 +782,11 @@ let data = null;         // { time[], grid:[{lat,lon,speed[],dir[],rh[],pr[]}], 
 let hourIdx = 0;
 let baseTimeLabel = "";
 let overlayMode = "combo";   // 'combo' | 'cvg' | 'mfc' | 'cape'
+let isoLayer, isoLabelLayer;
+let isoOn = (localStorage.getItem('wa_iso')==='1');
+let isoData = null;      // { time[], series[[hPa per hour] per point], map:{mainHour -> isoIdx} }
+let isoErr = null;       // never fail silently — the legend says why the layer is empty
+let isoBusy = false, isoRedrawT = null;
 
 function loadCenter(){
   try{ const c=JSON.parse(localStorage.getItem("wa_center")); if(c&&isFinite(c.lat)&&isFinite(c.lon)) return {lat:c.lat, lon:c.lon, name:null}; }catch(e){}
@@ -722,7 +815,6 @@ function saveFavs(){ try{ localStorage.setItem('wa_favs', JSON.stringify(favs));
 function coordKey(lat,lon){ return (+lat).toFixed(3)+','+(+lon).toFixed(3); }
 function recAt(lat,lon){ const k=coordKey(lat,lon); return favs.find(f=>coordKey(f.lat,f.lon)===k); }
 function activeFavAt(lat,lon){ const f=recAt(lat,lon); return (f && !f.deleted && f.fav)?f:null; }
-function toast(msg){ let t=document.getElementById('wtoast'); if(!t){t=document.createElement('div');t.id='wtoast';document.body.appendChild(t);} t.textContent=msg; t.className='show'; clearTimeout(toast._t); toast._t=setTimeout(()=>t.className='',1800); }
 
 let seedLayer=null, showSeeds=(localStorage.getItem('wa_showseeds')!=='0');
 function seedIcon(){ return L.divIcon({className:'seedmark', html:'★', iconSize:[22,22], iconAnchor:[11,11]}); }
@@ -880,6 +972,14 @@ function initMap(){
     maxZoom:16, subdomains:'abcd'
   }).addTo(map);
   cellLayer = L.layerGroup().addTo(map);
+  // Isobars get their own pane above the overlay pane (400). The field overlays are
+  // torn down and re-appended on every render, so sharing a pane would let them
+  // shuffle over the contours at random.
+  map.createPane('isopane');
+  map.getPane('isopane').style.zIndex = 450;
+  map.getPane('isopane').style.pointerEvents = 'none';
+  isoLayer = L.layerGroup().addTo(map);
+  isoLabelLayer = L.layerGroup().addTo(map);
   arrowLayer = L.layerGroup().addTo(map);
   centerPin = L.marker([center.lat,center.lon],{
     icon:L.divIcon({className:'focuspin', iconSize:[30,40], iconAnchor:[15,38],
@@ -890,6 +990,12 @@ function initMap(){
     interactive:false, keyboard:false, zIndexOffset:1000
   }).addTo(map);
   fitGrid();
+  // Contours are held in lat/lon so Leaflet reprojects them for free, but the value
+  // labels are placed by screen-space collision and have to be recomputed.
+  map.on('zoomend moveend', ()=>{
+    if(!isoOn || !isoData) return;
+    clearTimeout(isoRedrawT); isoRedrawT = setTimeout(drawIsobars, 90);
+  });
   map.on('click', e=>{
     center.lat = +e.latlng.lat.toFixed(4); center.lon = +e.latlng.lng.toFixed(4);
     center.name = null; centerPin.setLatLng([center.lat,center.lon]);
@@ -942,12 +1048,12 @@ async function loadData(){
   // Winds/T/RH need pressure levels → IFS 0.25°. CAPE/precip are surface → sharper on IFS HRES 9km.
   // /v1/ecmwf serves best-per-variable automatically (9km surface + 0.25° upper-air).
   const vars = `wind_speed_925hPa,wind_direction_925hPa,wind_speed_850hPa,wind_direction_850hPa,`
-    + `temperature_925hPa,relative_humidity_925hPa,cape,precipitation,wind_gusts_10m`;
+    + `temperature_925hPa,relative_humidity_925hPa,cape,precipitation,wind_gusts_10m,pressure_msl`;
   const url = CAPE_HIRES
     ? `https://api.open-meteo.com/v1/ecmwf?latitude=${lats.join(',')}&longitude=${lons.join(',')}`
-      + `&hourly=${vars}&wind_speed_unit=ms&timezone=auto`
+      + `&hourly=${vars}&wind_speed_unit=ms&timezone=${TZ}`
     : `https://api.open-meteo.com/v1/forecast?latitude=${lats.join(',')}&longitude=${lons.join(',')}`
-      + `&hourly=${vars}&models=ecmwf_ifs025&forecast_days=3&wind_speed_unit=ms&timezone=auto`;
+      + `&hourly=${vars}&models=ecmwf_ifs025&forecast_days=3&wind_speed_unit=ms&timezone=${TZ}`;
   try{
     const res = await fetch(url, {signal:ac.signal});
     if(!res.ok) throw new Error("HTTP "+res.status);
@@ -957,7 +1063,7 @@ async function loadData(){
     const full = arr[0].hourly.time;
     const target = Date.now() - 2*3600*1000;
     let startIdx=0, bd=1e18;
-    full.forEach((t,i)=>{ const d=Math.abs(new Date(t).getTime()-target); if(d<bd){bd=d;startIdx=i;} });
+    full.forEach((t,i)=>{ const d=Math.abs(mytMs(t)-target); if(d<bd){bd=d;startIdx=i;} });
     startIdx = Math.max(0, Math.min(startIdx, full.length - FORECAST_HOURS));
     const win = a => a ? a.slice(startIdx, startIdx+FORECAST_HOURS) : a;
     const time = win(full);
@@ -970,30 +1076,49 @@ async function loadData(){
         t925:need(h.temperature_925hPa),  rh925:need(h.relative_humidity_925hPa),
         cape:win(h.cape||[]),
         pr:win(h.precipitation||[]),
+        mslp:win(h.pressure_msl||[]),
         gust:win(h.wind_gusts_10m||[]) };
     });
-    // Terrain elevation (static, Copernicus DEM 90m via Open-Meteo) — optional enhancement
-    try{
-      const elev = await fetchElevation(lats, lons, ac.signal);
-      if(elev && elev.length===grid.length) grid.forEach((g,k)=>{ g.elev = elev[k]; });
-    }catch(e){ /* terrain optional — weather still works without it */ }
-    data = { time, grid, hours:time.length };
+    // The forecast is requested in MYT and comes back as NAIVE local stamps. The isobar
+    // grid spans 6° and would straddle +07/+08 under timezone=auto, so it is fetched in
+    // GMT instead; keeping the offset here lets the two axes be matched on absolute time
+    // rather than on string equality, whatever zone either side is expressed in.
+    data = { time, grid, hours:time.length, tzOffset:(arr[0].utc_offset_seconds||0) };
     seriesCache=null;
     confShown=false; { const cb=document.getElementById('confBody'); if(cb) cb.innerHTML=''; }
     // snap slider to current hour
     hourIdx = nearestHourIndex(time);
     document.getElementById('hourSlider').max = time.length-1;
     document.getElementById('hourSlider').value = hourIdx;
-    try{ localStorage.setItem("wa_cache", JSON.stringify({center, data, at:Date.now()})); }catch(e){}
+    saveCache();
     render();
     setStatus(false, "");
+    // Terrain (static Copernicus DEM 90 m) is an OPTIONAL enhancement, so it must not
+    // hold up the first paint the way it used to — it is a second round-trip on every
+    // location change. Fetch it after the map is already usable and re-render when it
+    // lands; `mine` guards against a newer request having replaced `data` meanwhile.
+    const mine = data;
+    fetchElevation(lats, lons, ac.signal).then(elev=>{
+      if(data!==mine) return;
+      if(!elev || elev.length!==mine.grid.length) return;
+      mine.grid.forEach((g,k)=>{ g.elev = elev[k]; });
+      saveCache(); render();
+    }).catch(()=>{ /* terrain optional — weather still works without it */ });
+    if(isoOn) loadIsobars(ac.signal);   // background — the map is usable without it
     loadConfidence();   // background auto-load (cached per location)
   }catch(err){
     if(err && err.name==='AbortError') return;   // superseded by a newer request
     // fall back to cache — loud about it, never silent-stale
     const c = loadCache();
-    if(c){ center=c.center; data=c.data; hourIdx=Math.min(hourIdx,data.hours-1);
-      render(); setStatus(false, "⚠ "+I18N[lang].offline); }
+    if(c){
+      const moved = Math.abs((c.center.lat||0)-center.lat)>1e-4
+                 || Math.abs((c.center.lon||0)-center.lon)>1e-4;
+      applyCache(c);
+      let msg = "⚠ "+I18N[lang].offline+cacheAgeText(c);
+      if(moved) msg += " · "+I18N[lang].offlineMoved
+        .replace('{lat}', c.center.lat.toFixed(3)).replace('{lon}', c.center.lon.toFixed(3));
+      setStatus(false, msg);
+    }
     else setStatus(false, "⚠ "+I18N[lang].failed);
   }finally{
     if(inflight===ac) inflight=null;
@@ -1002,12 +1127,40 @@ async function loadData(){
 }
 
 function loadCache(){
-  try{ const c=JSON.parse(localStorage.getItem("wa_cache")); return c&&c.data?c:null; }catch(e){ return null; }
+  try{ const c=JSON.parse(localStorage.getItem("wa_cache2")); return c&&c.data?c:null; }catch(e){ return null; }
+}
+function saveCache(){
+  try{ localStorage.setItem("wa_cache2", JSON.stringify({center, data, at:Date.now()})); }catch(e){}
+}
+// How old the cached run is, in plain words. A cache with no age is worse than no
+// cache: "showing last cached" without a time is a claim the reader cannot check.
+function cacheAgeText(c){
+  if(!c || !c.at) return "";
+  const mins=Math.max(0, Math.round((Date.now()-c.at)/60000));
+  const T=I18N[lang];
+  if(mins<60) return " · "+T.cacheAgeMin.replace('{n}', mins);
+  const hrs=Math.round(mins/60);
+  if(hrs<48) return " · "+T.cacheAgeHr.replace('{n}', hrs);
+  return " · "+T.cacheAgeDay.replace('{n}', Math.round(hrs/24));
+}
+// Move the ENTIRE view to the cached run — pin, input fields and map included — so the
+// map and the numbers can never describe two different places.
+function applyCache(c){
+  center = { lat:c.center.lat, lon:c.center.lon, name:c.center.name||null };
+  data = c.data;
+  seriesCache=null; isoData=null; isoErr=null;
+  hourIdx = Math.min(nearestHourIndex(data.time), data.hours-1);
+  const sl=document.getElementById('hourSlider');
+  if(sl){ sl.max=data.hours-1; sl.value=hourIdx; }
+  if(centerPin) centerPin.setLatLng([center.lat, center.lon]);
+  syncFields(); saveCenter();
+  if(map){ isoOn ? map.fitBounds(isoBounds(),{padding:[16,16],animate:false}) : fitGrid(); }
+  render();
 }
 function nearestHourIndex(times){
   const now=Date.now();
   let best=0,bd=1e18;
-  times.forEach((t,i)=>{ const d=Math.abs(new Date(t).getTime()-now); if(d<bd){bd=d;best=i;} });
+  times.forEach((t,i)=>{ const d=Math.abs(mytMs(t)-now); if(d<bd){bd=d;best=i;} });
   return best;
 }
 
@@ -1243,6 +1396,7 @@ function render(){
   const hr = hourIdx;
   const C = convergenceField(hr);
   drawCells(C);
+  drawIsobars();
   drawArrows(hr);
   drawReadout(C, hr);
   drawSpark();
@@ -1353,6 +1507,237 @@ function smoothField(valAt, colorFn, i0,i1,j0,j1, gAt){
   L.imageOverlay(cv.toDataURL(), [[sLat,wLon],[nLat,eLon]], {opacity:1, interactive:false}).addTo(cellLayer);
 }
 
+
+/* ================= ISOBARS ==================================================
+   Ported from 风眼 TyphoonWatch. Marching squares over the ECMWF mean-sea-level
+   pressure field, drawn and nothing more: no low is named, no circulation is
+   classified, no centre is marked. A closed contour off the coast is yours to
+   read. Two things are worth holding in mind while reading it:
+
+   1. Tropical pressure gradients are slack. A mid-latitude chart draws 4 hPa
+      isobars; over Malaysia that gives you a blank map. This layer starts at
+      1 hPa, drops to 0.5 or 0.25 when the field is flatter, and always prints
+      the interval it chose. If even 0.25 hPa finds nothing it says so, rather
+      than drawing a shape that is not there.
+   2. The semidiurnal atmospheric tide swings tropical MSLP by roughly +-1.5 hPa
+      twice a day, and across a 6 degree box it does so almost uniformly. So the
+      LABELS breathe up and down through the day while the SHAPE of the field
+      barely moves. Read the pattern and the spacing; do not read "1006 at 4pm,
+      1008 at 10am" as a low filling in. ====================================== */
+
+function isoCoords(){
+  const half=(ISO.n-1)/2, lats=[], lons=[];
+  for(let i=0;i<ISO.n;i++) for(let j=0;j<ISO.n;j++){
+    lats.push(+(center.lat+(half-i)*ISO.spacing).toFixed(4));
+    lons.push(+(center.lon+(j-half)*ISO.spacing).toFixed(4));
+  }
+  return {lats,lons};
+}
+function isoLat(i){ return center.lat + ((ISO.n-1)/2 - i)*ISO.spacing; }
+function isoLon(j){ return center.lon + (j - (ISO.n-1)/2)*ISO.spacing; }
+function isoBounds(){
+  const d=((ISO.n-1)/2)*ISO.spacing;
+  return [[center.lat-d, center.lon-d],[center.lat+d, center.lon+d]];
+}
+
+async function loadIsobars(signal){
+  isoData=null; isoErr=null; isoBusy=true;
+  drawIsobars(); drawLegend();
+  try{
+    const {lats,lons}=isoCoords();
+    const CH=100, series=[]; let times=null;
+    for(let s=0;s<lats.length;s+=CH){
+      const la=lats.slice(s,s+CH), lo=lons.slice(s,s+CH);
+      const url=`https://api.open-meteo.com/v1/ecmwf?latitude=${la.join(',')}&longitude=${lo.join(',')}`
+        +`&hourly=pressure_msl&timezone=GMT&cell_selection=nearest`;
+      const res=await fetch(url, signal?{signal}:{});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      const j=await res.json(), arr=Array.isArray(j)?j:[j];
+      if(arr.length!==la.length) throw new Error("got "+arr.length+" of "+la.length+" points");
+      arr.forEach(a=>{
+        if(!a.hourly||!a.hourly.pressure_msl) throw new Error("no pressure_msl in response");
+        if(!times) times=a.hourly.time;
+        series.push(a.hourly.pressure_msl);
+      });
+    }
+    if(!times||!times.length) throw new Error("empty time axis");
+    // Match the two time axes on ABSOLUTE time. Main-grid stamps are local-naive,
+    // isobar stamps are UTC; neither can be compared as a string.
+    const isoMs=times.map(t=>Date.parse(t+"Z"));
+    const off=(data.tzOffset||0)*1000, hmap={};
+    data.time.forEach((t,hr)=>{
+      const want=Date.parse(t+"Z")-off;
+      let best=-1, bd=1e18;
+      for(let k=0;k<isoMs.length;k++){ const d=Math.abs(isoMs[k]-want); if(d<bd){bd=d;best=k;} }
+      if(bd<=45*60*1000) hmap[hr]=best;   // within half a step; otherwise leave the hour uncovered
+    });
+    isoData={ time:times, series, map:hmap };
+  }catch(err){
+    if(err && err.name==='AbortError'){ isoBusy=false; return; }
+    isoErr=(err&&err.message)||"error";
+  }
+  isoBusy=false;
+  drawIsobars(); drawLegend();
+}
+
+// Pressure values on the ISO grid for a main-grid hour, or null if that hour is uncovered.
+function isoField(hr){
+  if(!isoData) return null;
+  const k=isoData.map[hr]; if(k==null) return null;
+  const V=new Array(ISO.n*ISO.n);
+  for(let p=0;p<V.length;p++){
+    const s=isoData.series[p], v=s?s[k]:null;
+    V[p]=(v==null||!isFinite(v))?NaN:v;
+  }
+  return V;
+}
+
+/* Choose the contour interval from the field's own range. Publishing the chosen
+   interval (see isoLegendHTML) is the whole point — a contour spacing you cannot
+   see is a claim you cannot check. */
+function isoInterval(V){
+  let lo=Infinity, hi=-Infinity, have=0;
+  for(let k=0;k<V.length;k++){ const v=V[k]; if(isFinite(v)){ have++; if(v<lo)lo=v; if(v>hi)hi=v; } }
+  if(!have) return null;
+  const S=ISO.steps, count=x=>Math.floor(hi/x+1e-9)-Math.ceil(lo/x-1e-9)+1;
+  let k=Math.max(0,S.indexOf(ISO.base));
+  while(count(S[k])<ISO.minLines && k>0) k--;                  // too few lines → finer
+  while(count(S[k])>ISO.maxLines && k<S.length-1) k++;         // too many → coarser
+  const c=count(S[k]);
+  return c>=1 ? {step:S[k], lo, hi, lines:c, have} : null;
+}
+
+// How much of the grid actually came back. A blank layer because half the points are
+// missing is a different fact from a blank layer because the field is flat, and the
+// legend must not report the second when it means the first.
+function isoCoverage(V){
+  let have=0; for(let k=0;k<V.length;k++) if(isFinite(V[k])) have++;
+  return {have, total:V.length, missing:V.length-have};
+}
+
+// Marching squares, worked in lat/lon so Leaflet reprojects the result for free.
+function isoContours(V){
+  const sel=isoInterval(V); if(!sel) return null;
+  const n=ISO.n, step=sel.step, out=[];
+  const at=(i,j)=>V[i*n+j];
+  const ip=(lv,p,q)=>(lv-p)/(q-p);
+  // edge ids: 0 top, 1 right, 2 bottom, 3 left. 5 and 10 are the ambiguous
+  // saddles, resolved the same way TyphoonWatch resolves them.
+  const TABLE={1:[3,2],2:[2,1],3:[3,1],4:[0,1],5:[3,0,2,1],6:[0,2],7:[3,0],
+               8:[3,0],9:[0,2],10:[3,2,0,1],11:[0,1],12:[3,1],13:[2,1],14:[3,2]};
+  const first=Math.ceil(sel.lo/step-1e-9)*step;
+  for(let lv=first; lv<=sel.hi+1e-9; lv+=step){
+    const L0=+lv.toFixed(4), segs=[];
+    for(let i=0;i<n-1;i++) for(let j=0;j<n-1;j++){
+      const a=at(i,j), b=at(i,j+1), c=at(i+1,j+1), d=at(i+1,j);   // TL TR BR BL
+      if(!isFinite(a)||!isFinite(b)||!isFinite(c)||!isFinite(d)) continue;
+      const idx=(a>L0?8:0)|(b>L0?4:0)|(c>L0?2:0)|(d>L0?1:0);
+      if(idx===0||idx===15) continue;
+      const y0=isoLat(i), y1=isoLat(i+1), x0=isoLon(j), x1=isoLon(j+1);
+      const E=[ [y0, x0+(x1-x0)*ip(L0,a,b)],
+                [y0+(y1-y0)*ip(L0,b,c), x1],
+                [y1, x0+(x1-x0)*ip(L0,d,c)],
+                [y0+(y1-y0)*ip(L0,a,d), x0] ];
+      const T=TABLE[idx];
+      for(let k=0;k+1<T.length;k+=2) segs.push([E[T[k]],E[T[k+1]]]);
+    }
+    if(segs.length) out.push({lvl:L0, segs});
+  }
+  return out.length ? {step, levels:out, lo:sel.lo, hi:sel.hi} : null;
+}
+
+function isoFmt(v, step){ return v.toFixed(step>=1?0:(step>=0.5?1:2)); }
+
+function drawIsobars(){
+  if(!isoLayer) return;
+  isoLayer.clearLayers(); isoLabelLayer.clearLayers();
+  if(!isoOn || !data || !isoData) return;
+  const V=isoField(hourIdx); if(!V) return;
+  const C=isoContours(V); if(!C) return;
+
+  /* Leaflet strokes in real screen pixels, so TyphoonWatch's 0.7 (which was 0.7
+     viewBox units scaled up by mapScale) would vanish here. 1.15px over a dark
+     casing carries the same intent: as fine as the screen will draw. At this box
+     size adjacent contours sit hundreds of km apart, so the casing cannot fuse
+     them — it only stops the line disappearing into a basemap place label. */
+  C.levels.forEach(l=>{
+    const paths=l.segs.map(s=>[[s[0][0],s[0][1]],[s[1][0],s[1][1]]]);
+    L.polyline(paths,{pane:'isopane',color:ISO.casing,weight:ISO.casingWeight,
+      opacity:0.5,lineCap:'round',interactive:false}).addTo(isoLayer);
+    L.polyline(paths,{pane:'isopane',color:ISO.color,weight:ISO.weight,
+      opacity:0.95,lineCap:'round',interactive:false}).addTo(isoLayer);
+  });
+
+  /* One value label per level. Where several levels crowd the same corner the
+     later ones are DROPPED rather than stacked: a missing number is honest,
+     overlapping digits are a wrong number. */
+  const size=map.getSize(), placed=[], DX=5, DY=20, H=16;
+  const free=(x,y,w)=>{
+    if(x<6||y<6||x+w>size.x-6||y+H>size.y-6) return false;
+    for(let i=0;i<placed.length;i++){
+      const b=placed[i];
+      if(x<b.x+b.w+10 && b.x<x+w+10 && y<b.y+H+4 && b.y<y+H+4) return false;
+    }
+    return true;
+  };
+  C.levels.slice().sort((a,b)=>b.lvl-a.lvl).forEach(l=>{
+    const cands=l.segs.map(s=>s[0]).sort((a,b)=>b[1]-a[1]);   // east-most first
+    const txt=isoFmt(l.lvl,C.step), w=txt.length*6.8;
+    const stride=Math.max(1,Math.floor(cands.length/40));
+    for(let i=0;i<cands.length;i+=stride){
+      const pt=map.latLngToContainerPoint(L.latLng(cands[i][0],cands[i][1]));
+      const x=pt.x+DX, y=pt.y-DY;
+      if(!free(x,y,w)) continue;
+      placed.push({x,y,w});
+      L.marker([cands[i][0],cands[i][1]],{pane:'isopane',interactive:false,keyboard:false,
+        icon:L.divIcon({className:'',html:'<div class="isolabel">'+txt+'</div>',
+          iconSize:[w+8,H], iconAnchor:[-DX,DY]})}).addTo(isoLabelLayer);
+      return;
+    }
+  });
+}
+
+// Appended to whichever overlay legend is showing, so the interval and the box
+// size are always on screen next to the lines they describe.
+function isoLegendHTML(){
+  if(!isoOn) return '';
+  const T=I18N[lang];
+  let note;
+  if(isoErr) note='⚠ '+T.isoFail+' · '+esc(isoErr);
+  else if(isoBusy||!isoData) note=T.isoLoading;
+  else{
+    const V=isoField(hourIdx);
+    if(!V) note='⚠ '+T.isoHour;
+    else{
+      const cov=isoCoverage(V), C=isoContours(V);
+      const gap=cov.missing ? ' · ⚠ '+T.isoGap.replace('{m}',cov.missing).replace('{n}',cov.total) : '';
+      if(!C) note='⚠ '+(cov.missing>cov.total/2 ? T.isoGap.replace('{m}',cov.missing).replace('{n}',cov.total) : T.isoFlat);
+      else{
+        const d=(ISO.n-1)*ISO.spacing;
+        note=T.isoLegend.replace('{s}', C.step)+' · '
+          +T.isoBox.replace('{d}', d.toFixed(0)).replace('{km}', Math.round(d*111))+gap;
+      }
+    }
+  }
+  return '<span class="grp"><span class="sw" style="background:'+ISO.color
+    +';height:3px;width:20px;border:none"></span>'+note+'</span>';
+}
+
+function toggleIso(){
+  isoOn=!isoOn;
+  try{ localStorage.setItem('wa_iso', isoOn?'1':'0'); }catch(e){}
+  document.getElementById('isoBtn').classList.toggle('on', isoOn);
+  if(isoOn){
+    // The pressure box is nearly 4x the convergence box, so show it — otherwise
+    // the contours are almost entirely off-screen and the layer looks broken.
+    map.fitBounds(isoBounds(),{padding:[16,16],animate:false});
+    if(!isoData && !isoBusy && data){ loadIsobars(); return; }
+  }else{
+    fitGrid();
+  }
+  drawIsobars(); drawLegend();
+}
+
 function drawArrows(hr){
   arrowLayer.clearLayers();
   if(irOn) return;   // keep IR view clear
@@ -1373,10 +1758,30 @@ function drawArrows(hr){
   });
 }
 
+function drawMslp(g, hr){
+  const wrap=document.getElementById('r-mslp-wrap');
+  const p=(g.mslp&&g.mslp[hr]!=null&&isFinite(g.mslp[hr]))?g.mslp[hr]:null;
+  if(p==null){ wrap.style.display='none'; return; }
+  wrap.style.display='';
+  document.getElementById('r-mslp').textContent=p.toFixed(1);
+  document.getElementById('t-mslp').textContent=I18N[lang].mslp;
+  // Forward-looking, because the window only reaches 2 h into the past. Labelled as
+  // such: this is the model's own 24 h tendency, not an observed fall. No verdict is
+  // attached to it — TyphoonWatch reads a tendency against northern reference
+  // stations it has and this app does not.
+  const k=hr+24, el=document.getElementById('r-mslp-chg');
+  const q=(k<(data.hours||0)&&g.mslp[k]!=null&&isFinite(g.mslp[k]))?g.mslp[k]:null;
+  if(q==null){ el.textContent=''; el.style.color=''; return; }
+  const d=q-p;
+  el.textContent=I18N[lang].mslp24+' '+(d>=0?'+':'−')+Math.abs(d).toFixed(1);
+  el.style.color = d<=-0.7 ? '#7dd3fc' : (d>=0.7 ? '#fbbf24' : '');
+}
+
 function drawReadout(C, hr){
   const cc = C[CENTER][CENTER];  // center interior point
   const cat = categoryOf(cc);
   const g = data.grid.find(x=>x.i===CENTER&&x.j===CENTER);
+  drawMslp(g, hr);
   const disp = (cc*1e5).toFixed(1);
   document.getElementById('r-val').textContent = (cc>0?'+':'')+disp;
   const cel=document.getElementById('r-cat');
@@ -1404,12 +1809,11 @@ function drawReadout(C, hr){
   const rPr=document.getElementById('r-pr');
   rPr.textContent=(ingM.ascent>0?'+':'')+ingM.ascent.toFixed(0); rPr.style.color=acat.col;
   const rPrCat=document.getElementById('r-pr-cat'); rPrCat.textContent=acat.label; rPrCat.style.color=acat.col;
-  const t=new Date(data.time[hr]);
-  baseTimeLabel = fmtTime(t);
+  baseTimeLabel = fmtTime(data.time[hr]);
   document.getElementById('r-loc').textContent =
     (center.name?(lang==='zh'?center.name.zh:center.name.en):`${center.lat.toFixed(3)}, ${center.lon.toFixed(3)}`)
     + " · " + baseTimeLabel;
-  document.getElementById('tl-when').textContent = fmtTime(t);
+  document.getElementById('tl-when').textContent = baseTimeLabel;
 
   // ---- storm-ingredient gating ----
   const ing = ingM;
@@ -1503,7 +1907,7 @@ function drawApproach(){
   const nowIdx=nearestHourIndex(data.time);        // always "from now", independent of the slider
   const A=computeApproach(nowIdx), L=I18N[lang].appr;
   if(!A){ el.innerHTML=''; return; }
-  const fmt=idx=>String(new Date(data.time[idx]).getHours()).padStart(2,'0')+':00';
+  const fmt=idx=>mytHH(data.time[idx]);
   const easing=()=>{ if(A.endsAt==null) return ''; const inN=A.endsAt-nowIdx;
     const lab = A.intermittent ? L.onoff : L.cont;
     return `<div class="apsub2">${lab} <b>${fmt(A.endsAt)}</b>${inN>0?` (${inN}${L.hAbbr})`:''}</div>`; };
@@ -1579,6 +1983,11 @@ function drawSpark(){
 }
 
 function drawLegend(){
+  drawLegendBase();
+  const iso=isoLegendHTML();
+  if(iso) document.getElementById('legend').innerHTML += iso;
+}
+function drawLegendBase(){
   const L=I18N[lang];
   const el=document.getElementById('legend');
   if(overlayMode==='terr'){
@@ -1706,8 +2115,8 @@ function irTimestamps(){
 }
 function irUpdateTime(){
   const d=irFrames[irIdx]; if(!d) return;
-  const hhmm=d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  document.getElementById('irTime').textContent = '🛰 '+hhmm+(lang==='zh'?' 红外':' IR');
+  const hhmm=mytClock(d.getTime());
+  document.getElementById('irTime').textContent = '🛰 '+hhmm+' '+I18N[lang].myt+(lang==='zh'?' 红外':' IR');
 }
 // only two panes ever — no stacked-layer texture eviction on iOS
 function ensureIrPanes(){
@@ -1798,8 +2207,8 @@ function irGoto(k){
     map.getPane('irp'+hiddenName).style.opacity=irOpacity;
     map.getPane('irp'+irVis).style.opacity=0;
     irVis=hiddenName; irIdx=k;
-    const d=irFrames[irIdx], hhmm=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-    const el2=document.getElementById('irTime'); if(el2) el2.textContent='🛰 '+hhmm+(lang==='zh'?' 红外·点击播放':' IR · tap to play');
+    const d=irFrames[irIdx], hhmm=mytClock(d.getTime());
+    const el2=document.getElementById('irTime'); if(el2) el2.textContent='🛰 '+hhmm+' '+I18N[lang].myt+(lang==='zh'?' 红外·点击播放':' IR · tap to play');
   };
   hidden.off('load'); hidden.once('load', done);
   hidden.setUrl(irUrlFor(irFrames[k]));
@@ -1813,7 +2222,7 @@ function irFrameForTime(ms){
 // when scrubbing the outlook into IR's ~2h past window, nudge IR to the matching frame
 function syncIRToHour(){
   if(!irOn || !irFrames.length || !data) return;
-  const t=new Date(data.time[hourIdx]).getTime();
+  const t=mytMs(data.time[hourIdx]);
   const k=irFrameForTime(t);
   if(k>=0 && k!==irIdx) irGoto(k);
 }
@@ -1898,6 +2307,10 @@ function applyLang(){
   document.getElementById('seg-cape').textContent = 'CAPE';
   document.getElementById('seg-terr').textContent = lang==='zh'?'地形':'Terrain';
   document.getElementById('t-ir').textContent = lang==='zh'?'卫星红外':'IR satellite';
+  document.getElementById('t-iso').textContent = L.iso;
+  document.getElementById('isoBtn').classList.toggle('on', isoOn);
+  document.getElementById('exp-iso').innerHTML = L.expIso;
+  document.getElementById('exp-tz').innerHTML = L.tzNote;
   document.getElementById('t-loc').textContent = lang==='zh'?'地点':'Places';
   document.getElementById('t-loc-title').textContent = lang==='zh'?'地点':'Locations';
   document.getElementById('t-loc-save').textContent = lang==='zh'?'➕ 收藏当前位置':'➕ Save current spot';
@@ -1913,28 +2326,77 @@ function applyLang(){
 
 /* ================= ECMWF ENSEMBLE CONFIDENCE ================= */
 let ensData=null, ensSig=null, confShown=false;
+
+/* Member keys are ENUMERATED from the response, never reconstructed. Open-Meteo
+   names them zero-padded and starting at member00 — `base+'_member'+m` built
+   `_member1`, which matches nothing, so every member but one silently dropped out
+   and the panel reported a single member as if it were the ensemble. Reading the
+   keys that are actually there also survives a member being absent from a run. */
+function memberKeys(h, base){
+  const re=new RegExp('^'+base+'_member\\d+$');
+  const keys=Object.keys(h).filter(k=>re.test(k))
+    .sort((a,b)=>(+a.match(/\d+$/)[0])-(+b.match(/\d+$/)[0]));
+  if(!keys.length && Array.isArray(h[base])) return [base];   // deterministic single run
+  return keys;
+}
+
 async function fetchEnsemble(){
   const sig=center.lat.toFixed(3)+','+center.lon.toFixed(3);
   if(ensSig===sig && ensData) return ensData;
+  /* 925 hPa RH first, so the ensemble measures the SAME quantity the deterministic
+     gate does. 2 m RH runs systematically higher in the tropics, so mixing the two
+     made the confidence bar read optimistic against the verdict directly above it.
+     2 m is still requested as a fallback, and the panel says which one it used. */
   const url=`https://ensemble-api.open-meteo.com/v1/ensemble`
     +`?latitude=${center.lat.toFixed(4)}&longitude=${center.lon.toFixed(4)}`
-    +`&hourly=relative_humidity_2m,cape&models=${ENSEMBLE.model}&forecast_days=3&timezone=auto`;
+    +`&hourly=relative_humidity_925hPa,relative_humidity_2m,cape&models=${ENSEMBLE.model}`
+    +`&forecast_days=3&timezone=${TZ}`;
   const res=await fetch(url); if(!res.ok) throw new Error("ens HTTP "+res.status);
   const json=await res.json();
   const h = Array.isArray(json) ? (json[0]&&json[0].hourly) : json.hourly;
-  if(!h || !h.relative_humidity_2m) throw new Error("ensemble fields unavailable");
-  const M=1+Object.keys(h).filter(k=>/^relative_humidity_2m_member\d+$/.test(k)).length;
-  ensData={hourly:h, members:M, time:h.time}; ensSig=sig;
+  if(!h || !h.time) throw new Error("ensemble fields unavailable");
+  let rhBase='relative_humidity_925hPa', rhKeys=memberKeys(h, rhBase);
+  if(!rhKeys.length){ rhBase='relative_humidity_2m'; rhKeys=memberKeys(h, rhBase); }
+  const capeKeys=memberKeys(h, 'cape');
+  if(!rhKeys.length || !capeKeys.length) throw new Error("no ensemble members in response");
+  /* THE HOUR AXIS. The ensemble series starts at 00:00 today; the main grid is a
+     48-slot WINDOW starting about 2 h before now. Indexing the ensemble with the
+     main grid's `hr` read roughly the current hour earlier in the day — plausible
+     numbers about the wrong time. Both axes are the same location and therefore the
+     same local zone, so absolute time matches them cleanly. */
+  ensData={ hourly:h, rhBase, rhKeys, capeKeys, members:Math.min(rhKeys.length, capeKeys.length),
+            time:h.time, map:null };
+  ensSig=sig;
   return ensData;
 }
+
+// main-grid hour -> ensemble index, built once per (run, location) pair
+function ensIndex(hr){
+  if(!ensData || !data) return null;
+  if(!ensData.map){
+    const ms=ensData.time.map(t=>Date.parse(t+"Z")), m={};
+    data.time.forEach((t,k)=>{
+      const want=Date.parse(t+"Z");
+      let best=-1, bd=1e18;
+      for(let i=0;i<ms.length;i++){ const d=Math.abs(ms[i]-want); if(d<bd){bd=d;best=i;} }
+      if(bd<=90*60*1000) m[k]=best;   // ECMWF ENS is 3-hourly at source; half a step
+    });
+    ensData.map=m;
+  }
+  const i=ensData.map[hr];
+  return i==null?null:i;
+}
+
 // member agreement on the storm ENVIRONMENT (moisture + instability) at hour hr
 function computeConfidence(hr){
   if(!ensData) return null;
+  const i=ensIndex(hr);
+  if(i==null) return { uncovered:true };
   const h=ensData.hourly, M=ensData.members;
-  const mv=(base,m)=>{ const k=m===0?base:base+'_member'+m; const a=h[k]; return (a&&a[hr]!=null)?a[hr]:null; };
+  const val=(k)=>{ const a=h[k]; return (a&&a[i]!=null&&isFinite(a[i]))?a[i]:null; };
   let valid=0, fav=0, moistY=0, instY=0;
   for(let m=0;m<M;m++){
-    const rh=mv('relative_humidity_2m',m), cape=mv('cape',m);
+    const rh=val(ensData.rhKeys[m]), cape=val(ensData.capeKeys[m]);
     if(rh==null||cape==null) continue;
     valid++;
     const moist=rh>=ING.rhOn, inst=cape>=ING.capeOn;
@@ -1942,7 +2404,10 @@ function computeConfidence(hr){
   }
   if(!valid) return null;
   const p=(n)=>Math.round(n/valid*100);
-  return { members:valid, favorable:fav, pctFav:p(fav), pctMoist:p(moistY), pctInst:p(instY) };
+  return { members:valid, offered:M, favorable:fav, pctFav:p(fav),
+           pctMoist:p(moistY), pctInst:p(instY),
+           rh925:ensData.rhBase==='relative_humidity_925hPa',
+           when:ensData.time[i] };
 }
 function loadConfidence(){
   if(!data) return;
@@ -1954,6 +2419,7 @@ function loadConfidence(){
 function renderConfidence(){
   if(!confShown || !ensData) return;
   const c=computeConfidence(hourIdx), body=document.getElementById('confBody'), V=I18N[lang].conf;
+  if(c && c.uncovered){ body.innerHTML='<span style="color:var(--muted)">'+V.uncovered+'</span>'; return; }
   if(!c){ body.innerHTML='<span style="color:var(--muted)">'+(lang==='zh'?'无有效成员':'no valid members')+'</span>'; return; }
   const col=c.pctFav>=66?'var(--bad)':c.pctFav>=33?'var(--warn)':'var(--muted)';
   const bar=(lab,pct,bc)=>`<div class="confrow"><span class="cflab">${lab}</span><span class="cfbarwrap"><span class="cfbar" style="width:${pct}%;background:${bc}"></span></span><b class="cfpct">${pct}%</b></div>`;
@@ -1961,7 +2427,7 @@ function renderConfidence(){
     `<div class="confhead" style="color:${col}">${V.overall}: ${c.pctFav}% <span class="cfsub">(${c.favorable}/${c.members} ${V.members})</span></div>`
     + bar(V.moist, c.pctMoist, 'var(--div)')
     + bar(V.inst, c.pctInst, 'var(--cvg3)')
-    + `<div class="cfnote">${V.note}</div>`;
+    + `<div class="cfnote">${c.rh925?V.note:V.note2m}</div>`;
 }
 
 /* ================= SHARE ================= */
@@ -1987,11 +2453,12 @@ function verdictText(ing){
 // short phrase for today's daytime (06–21) storm window
 function todayWindow(){
   const M=I18N[lang].morn;
-  const now=new Date(),ty=now.getFullYear(),tm=now.getMonth(),td=now.getDate();
+  const today=mytToday();
   const marks=[];
-  data.time.forEach((t,i)=>{ const d=new Date(t);
-    if(d.getFullYear()===ty&&d.getMonth()===tm&&d.getDate()===td&&d.getHours()>=6&&d.getHours()<=21){
-      const ing=stormIngredients(i); marks.push({h:d.getHours(), lvl:ing.level}); }
+  data.time.forEach((t,i)=>{
+    const hr=mytHour(t);
+    if(mytDay(t)===today && hr>=6 && hr<=21){
+      const ing=stormIngredients(i); marks.push({h:hr, lvl:ing.level}); }
   });
   if(!marks.length) return M.nodata;
   const storm=marks.filter(m=>m.lvl>=3);
@@ -2011,7 +2478,7 @@ function shareRainText(){
   const nowIdx=nearestHourIndex(data.time);
   const A=computeApproach(nowIdx); if(!A) return '';
   const P=I18N[lang].appr;
-  const fmt=idx=>String(new Date(data.time[idx]).getHours()).padStart(2,'0')+':00';
+  const fmt=idx=>mytHH(data.time[idx]);
   let head='';
   if(A.rainingHere) head=`🌧 ${P.here}`;
   else if(A.eta!=null){ const inN=A.eta-nowIdx; head=`🌧 ${P.reaching}${fmt(A.eta)}${inN>0?` (${inN}${P.hAbbr})`:''}`; }
@@ -2035,7 +2502,8 @@ function buildShareText(){
   const val=(cc>0?'+':'')+(cc*1e5).toFixed(1)+"×10⁻⁵ s⁻¹";
   const capeTxt=ing.capeUnknown?"—":Math.round(ing.cape)+" J/kg";
   const mark=b=>b?"✅":"⬜";
-  const dd=String(new Date().getDate()).padStart(2,'0'), mmn=String(new Date().getMonth()+1).padStart(2,'0');
+  const md=mytToday();   // the date in Malaysia, not on whatever device is sharing
+  const dd=md.slice(8,10), mmn=md.slice(5,7);
   const todayLab=(lang==='zh'?'今日':'Today')+` (${dd}/${mmn})`;
   const mfcTxt=(ing.mfc>0?'+':'')+ing.mfc.toFixed(1)+" g/kg·h";
   const ascTxt=(ing.ascent>0?'+':'')+ing.ascent.toFixed(0)+" cm/s";
@@ -2073,11 +2541,15 @@ function sendShare(){
   closeShare();
 }
 
-function fmtTime(t){
+// `s` is a naive MYT stamp from the API. "Today" means today in Malaysia, not on the
+// device, and the MYT tag is printed so the reader can check it.
+function fmtTime(s){
   const days=lang==='zh'?['周日','周一','周二','周三','周四','周五','周六']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const now=new Date(); const sameDay=t.toDateString()===now.toDateString();
-  const hh=String(t.getHours()).padStart(2,'0');
-  return (sameDay?(lang==='zh'?'今天':'Today'):days[t.getDay()])+" "+hh+":00";
+  const d=new Date(Date.parse(s+"Z"));
+  if(isNaN(d)) return "—";
+  const sameDay = mytDay(s)===mytToday();
+  return (sameDay?(lang==='zh'?'今天':'Today'):days[d.getUTCDay()])
+    +" "+p2(d.getUTCHours())+":00 "+I18N[lang].myt;
 }
 function setStatus(spin,msg){
   document.getElementById('status').innerHTML = (spin?'<span class="spin"></span>':'')+(msg||'');
@@ -2129,6 +2601,7 @@ function setupSpark(){
 document.documentElement.lang = lang==='zh'?'zh':'en';
 applyLang();
 initMap();
+if(isoOn) map.fitBounds(isoBounds(),{padding:[16,16],animate:false});
 syncFields();
 setupSpark();
 // Pause the IR loop while the app is backgrounded (battery/data); resume on return.
@@ -2140,7 +2613,12 @@ document.addEventListener('visibilitychange', ()=>{
     irBgStopped=false; irPlayStart=Date.now(); irAdvance((irIdx+1)%irFrames.length,false);
   }
 });
-const cached=loadCache(); // show something instantly if offline
+// Paint the last cached run immediately, so a cold start on a bad connection shows
+// something rather than an empty page; loadData() replaces it as soon as it answers.
+{
+  const cached=loadCache();
+  if(cached){ applyCache(cached); setStatus(false, "⚠ "+I18N[lang].offline+cacheAgeText(cached)); }
+}
 loadData();
 registerSW();
 </script>
