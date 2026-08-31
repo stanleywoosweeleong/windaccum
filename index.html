@@ -881,8 +881,12 @@ function fitGrid(){ if(map) map.fitBounds(gridBounds(), {padding:[24,24], animat
 function initMap(){
   map = L.map('map',{zoomControl:true, attributionControl:false}).setView([center.lat,center.lon], 9);
   map.zoomControl.setPosition('topleft');
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
-    maxZoom:16, subdomains:'abcd'
+  // Keyless dark basemap: Esri World Dark Gray Canvas (base + reference labels). No API key.
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',{
+    maxZoom:16
+  }).addTo(map);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',{
+    maxZoom:16
   }).addTo(map);
   cellLayer = L.layerGroup().addTo(map);
   arrowLayer = L.layerGroup().addTo(map);
@@ -1898,8 +1902,7 @@ function applyLang(){
     + (lang==='zh' ? '地形 ' : 'Terrain: ')
     + '<a href="https://spacedata.copernicus.eu" target="_blank" rel="noopener">Copernicus DEM</a> · '
     + (lang==='zh' ? '地图 ' : 'Map: ')
-    + '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · '
-    + '© <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> · '
+    + '© <a href="https://www.esri.com" target="_blank" rel="noopener">Esri</a> · © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> · '
     + (lang==='zh' ? '卫星 ' : 'Satellite: ')
     + '<a href="https://www.earthdata.nasa.gov/gibs" target="_blank" rel="noopener">NASA GIBS</a> · JMA Himawari-9';
   // overlay toggle labels
