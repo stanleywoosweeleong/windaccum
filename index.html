@@ -753,6 +753,7 @@ function toggleSeeds(){
   drawSeeds();
 }
 function jumpTo(lat,lon,name){
+  cancelAutoLocate();
   center={lat:+(+lat).toFixed(4), lon:+(+lon).toFixed(4), name: name?{zh:name,en:name}:null};
   if(centerPin) centerPin.setLatLng([center.lat,center.lon]);
   syncFields(); saveCenter(); fitGrid();
@@ -900,6 +901,7 @@ function initMap(){
   }).addTo(map);
   fitGrid();
   map.on('click', e=>{
+    cancelAutoLocate();
     center.lat = +e.latlng.lat.toFixed(4); center.lon = +e.latlng.lng.toFixed(4);
     center.name = null; centerPin.setLatLng([center.lat,center.lon]);
     syncFields(); saveCenter(); fitGrid();
@@ -1664,30 +1666,56 @@ function goManual(){
     gpsInfo(lang==='zh'?"请输入有效的经纬度":"Enter a valid latitude & longitude", true);
     return;
   }
+  cancelAutoLocate();
   center={lat:+la.toFixed(4), lon:+lo.toFixed(4), name:null};
   centerPin.setLatLng([center.lat,center.lon]); fitGrid();
   syncFields(); saveCenter(); gpsInfo(""); loadData();
 }
 
-function useMyLocation(){
-  if(!('geolocation' in navigator)){ gpsInfo(lang==='zh'?"此设备不支持定位":"Geolocation not supported", true); return; }
-  const btn=document.getElementById('geoBtn'); btn.disabled=true;
+// auto=true: the launch-time fix. Quiet on failure (the saved spot keeps showing), accepts a
+// coarse/recent fix so it returns fast, and never overrides a spot the user picked meanwhile.
+let autoLocating=false;   // true while the launch fix is pending; any manual pick clears it
+function cancelAutoLocate(){ if(autoLocating){ autoLocating=false; gpsInfo(""); } }
+function useMyLocation(auto){
+  auto = auto===true;
+  if(!auto){ cancelAutoLocate(); }
+  if(!('geolocation' in navigator)){ if(!auto) gpsInfo(lang==='zh'?"此设备不支持定位":"Geolocation not supported", true); return; }
+  const btn=document.getElementById('geoBtn');
+  if(auto) autoLocating=true; else btn.disabled=true;
   gpsInfo(lang==='zh'?"定位中…":"Locating…");
   navigator.geolocation.getCurrentPosition(p=>{
-    btn.disabled=false;
-    center={lat:+p.coords.latitude.toFixed(4), lon:+p.coords.longitude.toFixed(4), name:null};
+    if(auto){
+      if(!autoLocating) return;          // user picked a spot / pressed the button while we waited
+      autoLocating=false;
+    } else btn.disabled=false;
+    const la=+p.coords.latitude.toFixed(4), lo=+p.coords.longitude.toFixed(4);
+    const acc=p.coords.accuracy?Math.round(p.coords.accuracy):null;
+    const msg=acc?(lang==='zh'?`已定位 · 精度约 ${acc}米`:`Located · ~${acc}m accuracy`):(lang==='zh'?"已定位":"Located");
+    // Launch fix that lands on the spot already showing: no need to refetch the forecast.
+    const same = Math.abs(la-center.lat)<0.005 && Math.abs(lo-center.lon)<0.005;
+    if(auto && same){ gpsInfo(msg); return; }
+    center={lat:la, lon:lo, name:null};
     centerPin.setLatLng([center.lat,center.lon]); fitGrid();
     syncFields(); saveCenter();
-    const acc=p.coords.accuracy?Math.round(p.coords.accuracy):null;
-    gpsInfo(acc?(lang==='zh'?`已定位 · 精度约 ${acc}米`:`Located · ~${acc}m accuracy`):"");
+    gpsInfo(msg);
     loadData();
   },err=>{
+    if(auto){
+      if(!autoLocating) return;
+      autoLocating=false;
+      // Not an error state: the last saved spot is on screen and still valid.
+      gpsInfo(err.code===1
+        ? (lang==='zh'?"未获定位权限 · 显示上次位置":"Location off · showing last spot")
+        : (lang==='zh'?"暂时无法定位 · 显示上次位置":"Couldn't locate · showing last spot"));
+      return;
+    }
     btn.disabled=false;
     const m={1:lang==='zh'?"定位权限被拒绝，请在设置中启用":"GPS permission denied — enable in Settings",
              2:lang==='zh'?"定位信号不可用，请到户外再试":"GPS signal unavailable — try outdoors",
              3:lang==='zh'?"定位超时，请到开阔处再试":"GPS timed out — try in an open area"};
     gpsInfo(m[err.code]||(lang==='zh'?"定位失败":"Location failed"), true);
-  },{enableHighAccuracy:true, timeout:15000, maximumAge:0});
+  }, auto ? {enableHighAccuracy:false, timeout:10000, maximumAge:300000}
+          : {enableHighAccuracy:true, timeout:15000, maximumAge:0});
 }
 
 function gpsInfo(msg, err){
@@ -2157,6 +2185,7 @@ document.addEventListener('visibilitychange', ()=>{
 });
 const cached=loadCache(); // show something instantly if offline
 loadData();
+useMyLocation(true);   // launch: show the saved spot at once, then move to where the user is
 registerSW();
 </script>
 </body>

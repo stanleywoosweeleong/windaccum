@@ -1,5 +1,5 @@
 风的累积 · Wind Accumulation — PWA bundle
-Version: windaccum-20260807-92
+Version: windaccum-20261116-93
 
 CONTENTS (deploy ALL 7 files to the same folder, e.g. your GitHub Pages repo root):
   index.html            the whole app (single file)
@@ -18,6 +18,19 @@ DEPLOY
 UPDATING (single place)
   Edit the app, then bump `const CACHE` in sw.js (e.g. -87 -> -88), and redeploy.
   Clients auto-update to the new version on next open.
+
+WHAT CHANGED IN -93 (locate on launch)
+  The app now asks for the current location as soon as it opens. The last saved spot
+  is drawn immediately (so nothing waits on GPS), then the pin and forecast move to
+  where you are once the fix arrives. Details:
+    - Launch uses a fast coarse fix (10 s timeout, a fix up to 5 min old is accepted);
+      the "Current location" button still does the precise high-accuracy fix.
+    - If the fix is within ~500 m of the spot already showing, the forecast is not
+      refetched.
+    - Tapping the map, a saved place, Go, or the location button while the launch fix
+      is pending cancels it - a late fix never overrides a spot you chose.
+    - Permission denied / no signal at launch is not an error: the app keeps the last
+      spot and says so in a quiet line.
 
 WHAT CHANGED IN -92 (Malaysia Standard Time)
   Every clock in the app now reads MYT (UTC+8), whatever the device is set to and
