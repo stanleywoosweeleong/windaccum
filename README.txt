@@ -22,6 +22,15 @@ UPDATING
   the new version simply appears on the next launch.
   Check a change before pushing:  node --check sw.js
 
+WHAT CHANGED (Bahasa Melayu)
+  The app now speaks three languages: 中文, English and Bahasa Melayu. The first-launch
+  picker offers all three, and the 🌐 button cycles 中文 -> EN -> BM. Every label,
+  warning, legend, the explanation panel and the WhatsApp / morning texts are
+  translated. Place and group names in the Places list are shown as saved.
+  The Malay text was machine-written - have a native speaker read it, the safety
+  warnings especially. All strings live in one place: the `ms` block of I18N plus
+  the third argument of each T(zh, en, ms) call in index.html.
+
 WHAT CHANGED (self-updating + language picker)
   1. No more manual version bump. sw.js keeps ONE fixed cache (windaccum-shell).
      The page asks the worker to re-check the shell files on launch and on every
