@@ -1,5 +1,4 @@
 风的累积 · Wind Accumulation — PWA bundle
-Version: windaccum-20261116-93
 
 CONTENTS (deploy ALL 7 files to the same folder, e.g. your GitHub Pages repo root):
   index.html            the whole app (single file)
@@ -15,11 +14,32 @@ DEPLOY
   2. Serve over HTTPS (GitHub Pages works). Service worker + install need HTTPS.
   3. Open the URL; "Add to Home Screen" installs it as a standalone app.
 
-UPDATING (single place)
-  Edit the app, then bump `const CACHE` in sw.js (e.g. -87 -> -88), and redeploy.
-  Clients auto-update to the new version on next open.
+UPDATING
+  Edit the app and push. There is no version number to bump any more.
+  GitHub Pages takes a minute or two to publish. After that, each installed copy
+  notices the change the next time it is opened or brought back to the front, and
+  shows a "new version is ready" bar with a Refresh button. If the bar is dismissed,
+  the new version simply appears on the next launch.
+  Check a change before pushing:  node --check sw.js
 
-WHAT CHANGED IN -93 (locate on launch)
+WHAT CHANGED (self-updating + language picker)
+  1. No more manual version bump. sw.js keeps ONE fixed cache (windaccum-shell).
+     The page asks the worker to re-check the shell files on launch and on every
+     return to the foreground; the worker compares index.html byte-for-byte and, if
+     it differs, the page shows the update bar. Old versioned caches
+     (windaccum-2026...) are removed automatically; caches belonging to other apps
+     on the same github.io origin are never touched.
+     BEHAVIOUR CHANGE: the app used to reload itself when a new worker took over.
+     Now it always opens the saved copy instantly and offers the update a moment
+     later (one tap). Installs still on the old worker migrate by themselves over a
+     launch or two; the bar first appears on the deploy AFTER that.
+  2. First-launch language picker. With no saved language the app opens on a
+     full-screen 中文 / English choice, remembers it, and never asks again. The 🌐
+     button still switches and saves through the same path. Anyone who never
+     pressed 🌐 before has nothing saved and will see the picker once.
+     The location request now waits until the language is chosen.
+
+WHAT CHANGED BEFORE THAT (locate on launch, was -93)
   The app now asks for the current location as soon as it opens. The last saved spot
   is drawn immediately (so nothing waits on GPS), then the pin and forecast move to
   where you are once the fix arrives. Details:

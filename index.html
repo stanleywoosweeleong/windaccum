@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
 /* ============ WIND ACCUMULATION — surface-analysis instrument ============
-   Release version lives in sw.js (const CACHE) — bump there on every release.
+   No release version to bump: sw.js compares index.html byte-for-byte and offers the update.
    Palette: atmospheric night base; convergence = warm bloom (air piling up),
             divergence = cool teal (air spreading). Wind ink = pale slate.
    Convergence is the subject, so it owns the only warm colour on the page. */
@@ -234,6 +234,31 @@ details[open] summary::after{content:"－"}
   transition:.25s;z-index:9999;box-shadow:var(--shadow);max-width:90vw;text-align:center}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
+/* "new version is ready" bar */
+.updtoast{position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom));transform:translateX(-50%);
+  display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--accent);color:var(--ink);
+  padding:9px 10px 9px 14px;border-radius:12px;font-size:13.5px;z-index:9000;box-shadow:var(--shadow);
+  width:max-content;max-width:calc(100vw - 24px)}
+.updtoast[hidden]{display:none}
+.updtoast span{flex:1;min-width:0}
+.updtoast button{border-radius:9px;font-size:13px;font-weight:800;cursor:pointer;font-family:var(--sans);padding:8px 12px;white-space:nowrap}
+#updgo{background:var(--accent);color:#231400;border:1px solid var(--accent)}
+#updx{background:transparent;color:var(--muted);border:1px solid var(--line)}
+
+/* first-launch language picker */
+#langpick{position:fixed;inset:0;z-index:10000;background:var(--base);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;
+  padding:calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom))}
+#langpick[hidden]{display:none}
+#langpick:focus{outline:0}
+#langpick img{width:88px;height:88px;border-radius:20px;box-shadow:var(--shadow)}
+#langpick .lptitle{margin:4px 0 0;font-size:22px;font-weight:800;text-align:center;line-height:1.35}
+#langpick .lpsub{margin:0 0 10px;font-size:12.5px;color:var(--muted);font-family:var(--mono);letter-spacing:.5px}
+#langpick button{width:min(18rem,84vw);min-height:58px;background:var(--panel);border:1px solid var(--line);color:var(--ink);
+  border-radius:14px;font-size:19px;font-weight:800;cursor:pointer;font-family:var(--sans)}
+#langpick button:active{background:var(--accent);color:#231400;border-color:var(--accent)}
+body.picking{overflow:hidden}
+
 /* footer action bar */
 .actionbar{display:flex;gap:10px;justify-content:center;margin-top:16px;padding:0 0 calc(6px + env(safe-area-inset-bottom))}
 .actionbar .btn{flex:1;max-width:none;text-align:center}
@@ -411,6 +436,18 @@ details[open] summary::after{content:"－"}
   </div>
 </div>
 <div class="toast" id="toast"></div>
+<div class="updtoast" id="updtoast" role="status" aria-live="polite" hidden>
+  <span id="t-upd">有新版本</span>
+  <button type="button" id="updgo">刷新</button>
+  <button type="button" id="updx" aria-label="✕">✕</button>
+</div>
+<div id="langpick" role="dialog" aria-modal="true" tabindex="-1" aria-label="中文 · English" hidden>
+  <img src="./icon-192.png" alt="">
+  <p class="lptitle">风的累积<br>Wind Accumulation</p>
+  <p class="lpsub">语言 · Language</p>
+  <button type="button" data-lang="zh" lang="zh-Hans">中文</button>
+  <button type="button" data-lang="en" lang="en">English</button>
+</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -690,7 +727,10 @@ const I18N = {
     }
   }
 };
-let lang = localStorage.getItem("wa_lang") || "zh";
+const LANGS = { zh:"zh", en:"en" };            // code → <html lang>
+let lang = (()=>{ try{ return localStorage.getItem("wa_lang"); }catch(e){ return null; } })();
+const FIRST_LAUNCH = !LANGS[lang];             // nothing valid saved → ask first
+if(FIRST_LAUNCH) lang = "zh";                  // what renders behind the picker
 
 /* ================= STATE ================= */
 let map, arrowLayer, cellLayer, centerPin;
@@ -1893,12 +1933,23 @@ function scrollToOutlook(){
   else{ window.scrollBy({top:Math.round(window.innerHeight*0.6), behavior:'smooth'}); }
 }
 
-function toggleLang(){
-  lang = lang==='zh'?'en':'zh';
-  localStorage.setItem("wa_lang",lang);
-  document.documentElement.lang = lang==='zh'?'zh':'en';
-  applyLang();
-  if(data) render();
+// One place that saves the language. Saves even when it equals the current one, so picking
+// the default on first launch is remembered and the picker never comes back.
+function setLang(l){
+  if(!LANGS[l]) return false;
+  const changed = (l!==lang);
+  lang = l;
+  try{ localStorage.setItem("wa_lang",lang); }catch(e){}
+  document.documentElement.lang = LANGS[lang];
+  if(changed){ applyLang(); if(data) render(); }
+  return true;
+}
+function toggleLang(){ setLang(lang==='zh'?'en':'zh'); }
+
+function showLangPick(on){
+  document.getElementById('langpick').hidden = !on;
+  document.body.classList.toggle('picking', on);
+  document.querySelector('.wrap').inert = on;
 }
 
 function applyLang(){
@@ -1951,6 +2002,8 @@ function applyLang(){
   // morning modal + button
   document.getElementById('m-send').textContent = L.send;
   document.getElementById('m-cancel').textContent = L.cancel;
+  document.getElementById('t-upd').textContent = lang==='zh'?'有新版本':'A new version is ready';
+  document.getElementById('updgo').textContent = lang==='zh'?'刷新':'Refresh';
   drawLegend();
 }
 
@@ -2131,24 +2184,29 @@ function toast(m){ const el=document.getElementById('toast'); el.textContent=m; 
 
 window.addEventListener('resize',()=>{ if(map){ map.invalidateSize(); } if(data) drawSpark(); });
 
-/* ================= OFFLINE SHELL (inline SW) ================= */
+/* ================= OFFLINE SHELL + SELF-UPDATE ================= */
+// The worker serves the saved app instantly. On launch and on every return to the foreground
+// the page asks it to "check"; if index.html changed it answers "updated" and we offer a reload.
+// Reloading is safe: location, language, favourites and the last forecast all live in localStorage.
 function registerSW(){
-  if(!('serviceWorker' in navigator)) return;
-  let hadController = !!navigator.serviceWorker.controller;
-  let refreshing = false;
-  // When a newly-deployed SW takes control, reload once to the fresh version.
-  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
-    if(refreshing) return;
-    if(!hadController){ hadController = true; return; }   // ignore the first-ever install claim
-    refreshing = true;
-    window.location.reload();
+  document.getElementById('updgo').onclick = ()=>location.reload();
+  document.getElementById('updx').onclick  = ()=>{ document.getElementById('updtoast').hidden = true; };
+  if(!('serviceWorker' in navigator) || location.protocol==='file:') return;
+  const askForUpdate = ()=>{
+    if(navigator.onLine===false) return;
+    navigator.serviceWorker.ready.then(reg=>{
+      if(reg.active) reg.active.postMessage("check");
+    }).catch(()=>{});
+  };
+  navigator.serviceWorker.addEventListener('message', e=>{
+    if(e.data==="updated") document.getElementById('updtoast').hidden = false;
   });
-  navigator.serviceWorker.register('./sw.js').then(reg=>{
-    // Standalone PWAs may resume without navigating — check for updates on focus.
-    document.addEventListener('visibilitychange', ()=>{
-      if(document.visibilityState==='visible') reg.update().catch(()=>{});
-    });
-  }).catch(()=>{});
+  const reg = ()=>navigator.serviceWorker.register('./sw.js').then(askForUpdate).catch(()=>{});
+  if(document.readyState==='complete') reg(); else window.addEventListener('load', reg);
+  // Installed PWAs stay open for days — check again whenever the app comes back to the front.
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState==='visible') askForUpdate();
+  });
 }
 
 /* ================= BOOT ================= */
@@ -2169,7 +2227,7 @@ function setupSpark(){
   cv.addEventListener('pointercancel',()=>{ dragging=false; });
 }
 
-document.documentElement.lang = lang==='zh'?'zh':'en';
+document.documentElement.lang = LANGS[lang];
 applyLang();
 initMap();
 syncFields();
@@ -2185,7 +2243,17 @@ document.addEventListener('visibilitychange', ()=>{
 });
 const cached=loadCache(); // show something instantly if offline
 loadData();
-useMyLocation(true);   // launch: show the saved spot at once, then move to where the user is
+// Launch: show the saved spot at once, then move to where the user is. On the very first
+// launch the language comes first, so the location prompt appears in an app they can read.
+document.getElementById('langpick').onclick = e=>{
+  if(setLang(e.target.getAttribute('data-lang'))){
+    showLangPick(false); window.scrollTo(0,0);
+    if(map) map.invalidateSize();
+    useMyLocation(true);
+  }
+};
+if(FIRST_LAUNCH){ showLangPick(true); document.getElementById('langpick').focus(); }
+else useMyLocation(true);
 registerSW();
 </script>
 </body>

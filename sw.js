@@ -1,54 +1,130 @@
-/* Wind Accumulation — service worker
-   Bump CACHE on every release so clients pick up the new shell. */
-const CACHE = 'windaccum-20261116-93';
-const SHELL = [
-  './',
-  './index.html',
-  './manifest.json',
-  './icon-192.png',
-  './icon-512.png',
-  './apple-touch-icon.png',
-  './favicon-32.png'
+/* Wind Accumulation — self-updating service worker.
+
+   No version number to bump. The app opens instantly from the cache, then the
+   page sends "check": every shell file is re-fetched, the cache is refreshed,
+   and if index.html came back different every open window is sent "updated"
+   so it can show its "new version" toast. */
+"use strict";
+
+var CACHE_PREFIX = "windaccum-";    /* unique to THIS app — see activate */
+var CACHE = "windaccum-shell";      /* fixed name; never changes between deploys */
+var INDEX = "./index.html";
+
+var SHELL = [
+  INDEX,
+  "./manifest.json",
+  "./icon-192.png",
+  "./icon-512.png",
+  "./apple-touch-icon.png",
+  "./favicon-32.png"
 ];
 
-self.addEventListener('install', e => {
+function sameBytes(a, b){
+  if (a.byteLength !== b.byteLength) return false;
+  var x = new Uint8Array(a), y = new Uint8Array(b);
+  for (var i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
+}
+
+/* Fetch one file past the HTTP cache and store it. Resolves true only when a
+   copy was already cached and the new one differs. Errors and non-200
+   responses leave the cache alone, so a 404/503 can never replace the app. */
+function refresh(url){
+  return fetch(url, { cache: "no-cache" }).then(function(res){
+    if (!res || !res.ok) return false;
+    return caches.open(CACHE).then(function(c){
+      return c.match(url).then(function(old){
+        return Promise.all([
+          old ? old.arrayBuffer() : null,
+          res.clone().arrayBuffer()
+        ]).then(function(b){
+          var changed = !!b[0] && !sameBytes(b[0], b[1]);
+          return c.put(url, res).then(function(){ return changed; });
+        });
+      });
+    });
+  }).catch(function(){ return false; });
+}
+
+function refreshShell(){
+  return Promise.all(SHELL.map(refresh)).then(function(changed){
+    return changed[SHELL.indexOf(INDEX)];
+  });
+}
+
+/* install: precache, then take over at once. Safe because the cache name is
+   stable — a new worker never strands an open page on a deleted cache. */
+self.addEventListener("install", function(e){
+  e.waitUntil(refreshShell().then(function(){ return self.skipWaiting(); }));
+});
+
+/* activate: delete only THIS app's other caches (e.g. old versioned ones).
+   Cache Storage is shared by the whole origin — on <user>.github.io that is
+   every project page — so never delete caches without our prefix. */
+self.addEventListener("activate", function(e){
   e.waitUntil(
-    caches.open(CACHE)
-      .then(c => c.addAll(SHELL))
-      .then(() => self.skipWaiting())
-      .catch(() => self.skipWaiting())   // still activate even if a shell asset is missing
+    caches.keys().then(function(keys){
+      return Promise.all(keys.map(function(k){
+        return (k.indexOf(CACHE_PREFIX) === 0 && k !== CACHE) ? caches.delete(k) : null;
+      }));
+    }).then(function(){ return self.clients.claim(); })
   );
 });
 
-self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys()
-      .then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
-});
+/* fetch:
+   - navigations  → the cached app, instantly; network only if nothing is cached
+   - same-origin  → cache first, then network, and cache what comes back
+   - cross-origin → left alone (forecast APIs, map + satellite tiles: always live,
+                    the page itself flags offline mode)
+   Freshness is handled by the "check" message, not here. */
+self.addEventListener("fetch", function(e){
+  var req = e.request;
+  if (req.method !== "GET") return;
 
-self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  const url = new URL(e.request.url);
+  var url;
+  try { url = new URL(req.url); } catch (err) { return; }
+  if (url.origin !== self.location.origin) return;
 
-  if (url.origin === location.origin) {
-    // App shell: cache-first, then network (and refresh cache).
+  if (req.mode === "navigate"){
     e.respondWith(
-      caches.match(e.request).then(hit =>
-        hit || fetch(e.request).then(res => {
-          const copy = res.clone();
-          caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
+      caches.match(INDEX).then(function(hit){
+        if (hit) return hit;
+        return fetch(req).then(function(res){
+          if (res.ok){
+            var copy = res.clone();
+            caches.open(CACHE).then(function(c){ c.put(INDEX, copy); });
+          }
           return res;
-        })
-      )
+        });
+      })
     );
-  } else {
-    // External (ECMWF/Open-Meteo, GIBS tiles, ensemble, basemap): network-first,
-    // fall back to any cached copy if offline. Never serve stale weather silently
-    // when online — the app itself flags offline mode.
-    e.respondWith(
-      fetch(e.request).catch(() => caches.match(e.request))
-    );
+    return;
   }
+
+  e.respondWith(
+    caches.match(req).then(function(hit){
+      if (hit) return hit;
+      return fetch(req).then(function(res){
+        if (res && res.status === 200 && res.type === "basic"){
+          var copy = res.clone();
+          caches.open(CACHE).then(function(c){ c.put(req, copy); });
+        }
+        return res;
+      });
+    })
+  );
+});
+
+/* "check" from a page: refresh the shell and, if index.html changed, tell
+   every open window so each can offer a reload. */
+self.addEventListener("message", function(e){
+  if (e.data !== "check") return;
+  e.waitUntil(
+    refreshShell().then(function(changed){
+      if (!changed) return;
+      return self.clients.matchAll({ type: "window" }).then(function(list){
+        list.forEach(function(c){ c.postMessage("updated"); });
+      });
+    })
+  );
 });
