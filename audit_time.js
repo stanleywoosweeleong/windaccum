@@ -2,7 +2,8 @@
    which is the only way to prove the rendering no longer depends on it. */
 const fs=require('fs'), vm=require('vm');
 const html=fs.readFileSync(require('path').join(__dirname,'index.html'),'utf8');
-const js=html.match(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/)[1];
+// the app is the LARGEST inline script (a tiny theme bootstrap sits in <head>)
+const js=[...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(m=>m[1]).sort((x,y)=>y.length-x.length)[0];
 let fail=0; const ok=(c,m)=>{ console.log((c?'  ok  ':'FAIL  ')+m); if(!c) fail++; };
 
 const consts=js.slice(0, js.indexOf('\nlet lang'));

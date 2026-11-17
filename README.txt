@@ -22,6 +22,17 @@ UPDATING
   the new version simply appears on the next launch.
   Check a change before pushing:  node --check sw.js
 
+WHAT CHANGED (light and dark mode)
+  The app follows the phone's light / dark setting, and a button beside 🌐 overrides
+  it: 🌓 auto (follow the phone) -> ☀️ light -> 🌙 dark. The choice is remembered.
+  - The map switches between Esri's Dark and Light Gray Canvas; wind arrows, isobars
+    and their labels switch ink to stay readable on either.
+  - Storm colours (the yellow / orange / red ramp and blue for dispersal) are the same
+    in both modes, so a colour means the same thing whichever mode you are in. Where
+    those colours are used as TEXT they are darkened in light mode.
+  - All colours live in the two variable blocks at the top of the stylesheet
+    (:root = dark, :root[data-theme="light"] = light).
+
 WHAT CHANGED (review fixes: clock, ensemble, offline)
   An outside review of main found that four fixes this README described under -91
   and -92 were NOT in index.html (the README had been uploaded from a newer bundle

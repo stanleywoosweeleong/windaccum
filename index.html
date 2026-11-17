@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
 <meta name="theme-color" content="#0d1b2a">
+<script>
+/* Theme before first paint: the saved choice ('light' | 'dark'), else the system setting. */
+(function(){ var t=null; try{ t=localStorage.getItem('wa_theme'); }catch(e){}
+  if(t!=='light'&&t!=='dark') t=(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark';
+  document.documentElement.setAttribute('data-theme',t); })();
+</script>
 <title>风的累积 · Wind Accumulation</title>
 <link rel="manifest" href="./manifest.json">
 <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
@@ -21,15 +27,35 @@
             divergence = cool teal (air spreading). Wind ink = pale slate.
    Convergence is the subject, so it owns the only warm colour on the page. */
 :root{
+  color-scheme:dark;
   --base:#0d1b2a; --panel:#14273b; --panel2:#1b344f;
   --ink:#e8eef4; --muted:#8ba3bd; --line:#24405c;
-  --cvg1:#fde68a; --cvg2:#fb923c; --cvg3:#dc2626;   /* accumulation ramp */
+  --cvg1:#fde68a; --cvg2:#fb923c; --cvg3:#dc2626;   /* accumulation ramp (fills — same in both themes) */
   --div:#38bdf8;                                     /* dispersal */
   --accent:#f59e0b;
   --ok:#34d399; --warn:#fbbf24; --bad:#f87171;
   --shadow:0 6px 24px rgba(0,0,0,.45);
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   --sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  /* theme-dependent inks: the same ramp when it is used as TEXT, and tinted-badge text */
+  --ink2:#cdd9e6; --ink3:#9db4cf; --well:#0a1521; --rain:#7dd3fc; --fav:#ffb51a; --accent-t:#f59e0b;
+  --cvg1-t:#fde68a; --cvg2-t:#fb923c; --cvg3-t:#f87171; --div-t:#38bdf8; --on-muted:#0d1b2a;
+  --t-amber:#ffcf7a; --t-red:#fca5a5; --t-cyan:#a9e6f5; --t-blue:#dbeafe; --t-brown:#fde9c8;
+  --swb:rgba(255,255,255,.35); --touch:rgba(255,255,255,.05);
+  --arrow:#dbe3ec; --arrowsh:rgba(0,0,0,.6); --iso:#f1f5f9; --halo:#0a1521;
+}
+/* Light theme. data-theme is set on <html> before first paint (see the script in <head>). */
+:root[data-theme="light"]{
+  color-scheme:light;
+  --base:#f3f5f8; --panel:#ffffff; --panel2:#edf1f6;
+  --ink:#0f1b2a; --muted:#5a6b7e; --line:#d3dbe5;
+  --ok:#047857; --warn:#b45309; --bad:#dc2626;
+  --shadow:0 4px 16px rgba(15,27,42,.10);
+  --ink2:#2c3b4d; --ink3:#4b5d72; --well:#e6ebf1; --rain:#0369a1; --fav:#b45309; --accent-t:#b45309;
+  --cvg1-t:#a16207; --cvg2-t:#c2410c; --cvg3-t:#b91c1c; --div-t:#0369a1; --on-muted:#ffffff;
+  --t-amber:#92400e; --t-red:#b91c1c; --t-cyan:#0e7490; --t-blue:#1d4ed8; --t-brown:#7c4a1e;
+  --swb:rgba(15,27,42,.28); --touch:rgba(15,27,42,.05);
+  --arrow:#1f2d3d; --arrowsh:rgba(255,255,255,.75); --iso:#16212e; --halo:#ffffff;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
@@ -47,6 +73,8 @@ header{display:flex;align-items:flex-start;justify-content:space-between;gap:12p
 .langbtn{background:var(--panel);border:1px solid var(--line);color:var(--ink);
   border-radius:10px;padding:8px 12px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
 .langbtn:active{transform:scale(.96)}
+.hdrbtns{display:flex;gap:8px;flex:none}
+#themeBtn{padding:8px 10px}
 
 /* Controls row */
 .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
@@ -69,13 +97,14 @@ select,.btn{background:var(--panel);border:1px solid var(--line);color:var(--ink
 /* Map */
 .mapwrap{position:relative}
 .scrolltouch{position:absolute;top:84px;bottom:0;width:42px;z-index:600;cursor:pointer;touch-action:pan-y}
-.scrolltouch.left{left:0;background:linear-gradient(90deg,rgba(255,255,255,.05),rgba(255,255,255,0));border-radius:0 0 0 14px}
-.scrolltouch.right{right:0;background:linear-gradient(270deg,rgba(255,255,255,.05),rgba(255,255,255,0));border-radius:0 0 14px 0}
+.scrolltouch.left{left:0;background:linear-gradient(90deg,var(--touch),transparent);border-radius:0 0 0 14px}
+.scrolltouch.right{right:0;background:linear-gradient(270deg,var(--touch),transparent);border-radius:0 0 14px 0}
 #map{height:min(64vh,660px);min-height:420px;border-radius:14px;border:1px solid var(--line);box-shadow:var(--shadow);
-  background:#0a1521;overflow:hidden;z-index:1}
-.leaflet-container{background:#0a1521;font-family:var(--sans)}
+  background:var(--well);overflow:hidden;z-index:1}
+.leaflet-container{background:var(--well);font-family:var(--sans)}
 .arrow{transition:transform .15s}
-.arrow svg{display:block;filter:drop-shadow(0 1px 1px rgba(0,0,0,.6))}
+.arrow{color:var(--arrow)}
+.arrow svg{display:block;filter:drop-shadow(0 1px 1px var(--arrowsh))}
 .focuspin{background:transparent!important;border:none!important;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6))}
 
 /* Readout card */
@@ -84,24 +113,24 @@ select,.btn{background:var(--panel);border:1px solid var(--line);color:var(--ink
 .readout .loc{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
 .focusfav{margin-left:auto;background:var(--panel2);border:1px solid var(--line);color:var(--muted);
   border-radius:9px;width:34px;height:30px;font-size:16px;cursor:pointer;flex:none;line-height:1}
-.focusfav.on{color:#ffb51a;border-color:rgba(255,181,26,.5);background:rgba(255,181,26,.12)}
+.focusfav.on{color:var(--fav);border-color:rgba(255,181,26,.5);background:rgba(255,181,26,.12)}
 .focusfav:active{transform:scale(.92)}
 .gauge{display:flex;align-items:baseline;gap:10px;margin:6px 0 2px}
 .gauge .val{font-size:38px;font-weight:800;font-family:var(--mono);line-height:1}
 .gauge .unit{font-size:13px;color:var(--muted);font-family:var(--mono)}
 .windwarn{margin-top:8px;padding:9px 12px;border-radius:10px;font-size:13.5px;font-weight:800;
-  background:rgba(245,180,60,.16);border:1px solid rgba(245,180,60,.55);color:#ffcf7a}
-.windwarn.severe{background:rgba(220,38,38,.18);border-color:rgba(220,38,38,.6);color:#fca5a5}
+  background:rgba(245,180,60,.16);border:1px solid rgba(245,180,60,.55);color:var(--t-amber)}
+.windwarn.severe{background:rgba(220,38,38,.18);border-color:rgba(220,38,38,.6);color:var(--t-red)}
 .primedcaveat{margin-top:8px;padding:9px 12px;border-radius:10px;font-size:12.5px;font-weight:700;line-height:1.45;
-  background:rgba(103,232,249,.1);border:1px solid rgba(103,232,249,.4);color:#a9e6f5}
+  background:rgba(103,232,249,.1);border:1px solid rgba(103,232,249,.4);color:var(--t-cyan)}
 .cat{display:inline-block;padding:4px 12px;border-radius:999px;font-size:13px;font-weight:800;margin-top:4px}
 .depthtag{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;margin:4px 0 0 6px;border:1px solid var(--line)}
 .depthtag.deep{color:var(--ok);border-color:rgba(52,211,153,.5);background:rgba(52,211,153,.10)}
 .depthtag.shallow{color:var(--muted)}
 .surgebadge{display:inline-block;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:800;margin:4px 0 0 6px;
-  color:#dbeafe;background:rgba(56,189,248,.18);border:1px solid rgba(56,189,248,.55)}
+  color:var(--t-blue);background:rgba(56,189,248,.18);border:1px solid rgba(56,189,248,.55)}
 .orobadge{display:inline-block;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:800;margin:4px 0 0 6px;
-  color:#fde9c8;background:rgba(180,120,60,.20);border:1px solid rgba(180,120,60,.6)}
+  color:var(--t-brown);background:rgba(180,120,60,.20);border:1px solid rgba(180,120,60,.6)}
 .verdict{margin-top:12px;padding:11px 13px;border-radius:11px;font-weight:800;font-size:15px;
   display:flex;align-items:center;gap:8px}
 .verdict .dot{width:9px;height:9px;border-radius:50%;background:currentColor;flex:none;opacity:.9}
@@ -126,12 +155,12 @@ select,.btn{background:var(--panel);border:1px solid var(--line);color:var(--ink
 .approachcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:13px 14px;margin-top:12px;box-shadow:var(--shadow)}
 .approachcard .aptitle{font-size:12px;color:var(--muted);font-family:var(--mono);letter-spacing:.5px;text-transform:uppercase;margin-bottom:7px}
 .apmain{font-size:16px;font-weight:800}
-.apmain.rain{color:#7dd3fc}
+.apmain.rain{color:var(--rain)}
 .apmain.dry{color:var(--muted);font-weight:700;font-size:14px}
 .apmain .apsub{font-size:13px;color:var(--muted);font-weight:600}
-.apsub2{font-size:13px;color:#cdd9e6;margin-top:4px}
-.aprates{margin-top:6px;font-size:12.5px;font-family:var(--mono);color:#9db4cf;display:flex;flex-wrap:wrap;gap:9px;align-items:baseline}
-.aprates .appk{color:#7dd3fc;font-weight:800}
+.apsub2{font-size:13px;color:var(--ink2);margin-top:4px}
+.aprates{margin-top:6px;font-size:12.5px;font-family:var(--mono);color:var(--ink3);display:flex;flex-wrap:wrap;gap:9px;align-items:baseline}
+.aprates .appk{color:var(--rain);font-weight:800}
 .aprates .apunit{color:var(--muted);font-weight:700}
 .apnote{font-size:11px;color:var(--muted);margin-top:8px;font-family:var(--mono);line-height:1.5}
 .confcard .btn{font-size:13px;padding:8px 12px}
@@ -156,14 +185,14 @@ select,.btn{background:var(--panel);border:1px solid var(--line);color:var(--ink
 input[type=range]{width:100%;margin:8px 0 2px;accent-color:var(--accent)}
 
 /* Legend */
-.legend{display:flex;align-items:center;gap:4px;margin-top:9px;font-size:11.5px;color:#cdd9e6;font-family:var(--mono);flex-wrap:wrap}
+.legend{display:flex;align-items:center;gap:4px;margin-top:9px;font-size:11.5px;color:var(--ink2);font-family:var(--mono);flex-wrap:wrap}
 .irrow{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
 .irbtn{font-size:12.5px;padding:7px 12px}
 .irbtn.on{background:var(--accent);color:#231400;border-color:var(--accent)}
-.isolab{font:700 10.5px/1 var(--mono);color:#f1f5f9;white-space:nowrap;text-align:center;
-  text-shadow:0 0 3px #0a1521,0 0 3px #0a1521,0 0 5px #0a1521}
+.isolab{font:700 10.5px/1 var(--mono);color:var(--iso);white-space:nowrap;text-align:center;
+  text-shadow:0 0 3px var(--halo),0 0 3px var(--halo),0 0 5px var(--halo)}
 .irtime{font-size:12px;color:var(--muted);font-family:var(--mono)}
-.irtime.irresume{color:var(--accent);cursor:pointer;font-weight:700}
+.irtime.irresume{color:var(--accent-t);cursor:pointer;font-weight:700}
 .iropacity{flex:1;min-width:110px;accent-color:var(--accent)}
 .seedmark,.favmark{display:flex!important;align-items:center;justify-content:center;line-height:1;
   background:transparent!important;border:none!important;box-shadow:none!important;cursor:pointer}
@@ -177,18 +206,18 @@ input[type=range]{width:100%;margin:8px 0 2px;accent-color:var(--accent)}
 .locsheet-title{font-size:16px;font-weight:800}
 .locsheet-x{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:9px;width:32px;height:32px;font-size:14px;cursor:pointer}
 .locsearch{width:100%;background:var(--base);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px 12px;font-size:14px;font-family:var(--sans);margin-bottom:9px}
-.locsave{width:100%;background:rgba(245,180,60,.14);border:1px solid rgba(245,180,60,.5);color:var(--accent);border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:9px}
+.locsave{width:100%;background:rgba(245,180,60,.14);border:1px solid rgba(245,180,60,.5);color:var(--accent-t);border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:9px}
 .locsave:active{transform:scale(.99)}
 .locbody{overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1}
-.locgrouph{font-size:12.5px;font-weight:800;color:#cdd9e6;font-family:var(--mono);padding:11px 4px 9px;position:sticky;top:0;background:var(--panel);cursor:pointer;display:flex;align-items:center;gap:7px;border-bottom:1px solid var(--line)}
+.locgrouph{font-size:12.5px;font-weight:800;color:var(--ink2);font-family:var(--mono);padding:11px 4px 9px;position:sticky;top:0;background:var(--panel);cursor:pointer;display:flex;align-items:center;gap:7px;border-bottom:1px solid var(--line)}
 .locgrouph.static{cursor:default}
 .locgrouph:active:not(.static){background:var(--panel2)}
-.locgrouph .lgcaret{color:#8ba3bd;font-size:10px;width:10px;flex:none}
+.locgrouph .lgcaret{color:var(--muted);font-size:10px;width:10px;flex:none}
 .locgrouph .lgname{flex:1;min-width:0}
 .locgrouph .locn{color:var(--muted);font-weight:600;background:var(--base);border:1px solid var(--line);border-radius:999px;padding:1px 8px;font-size:11px}
 .locrow{display:flex;gap:6px;align-items:stretch;margin-bottom:5px}
 .locstar{flex:0 0 34px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:9px;font-size:15px;cursor:pointer}
-.locstar.on{color:#ffd24d;border-color:rgba(255,210,77,.5)}
+.locstar.on{color:var(--fav);border-color:rgba(255,210,77,.5)}
 .locstar:active{transform:scale(.9)}
 .locjump{flex:1;text-align:left;background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:9px;
   padding:9px 11px;font-size:13.5px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -196,11 +225,11 @@ input[type=range]{width:100%;margin:8px 0 2px;accent-color:var(--accent)}
 .locjump.dim{opacity:.55}
 .loccoord{font-size:11px;color:var(--muted);font-family:var(--mono)}
 .locjump:active .loccoord{color:#231400}
-.locedit,.locrestore{flex:0 0 38px;background:var(--panel2);border:1px solid var(--line);color:#9db4cf;border-radius:9px;font-size:13px;cursor:pointer}
-.locdel{flex:0 0 38px;background:var(--panel2);border:1px solid var(--line);color:#f87171;border-radius:9px;font-size:13px;cursor:pointer}
-.locpurge{width:100%;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.4);color:#f87171;border-radius:9px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;margin:4px 0 8px}
+.locedit,.locrestore{flex:0 0 38px;background:var(--panel2);border:1px solid var(--line);color:var(--ink3);border-radius:9px;font-size:13px;cursor:pointer}
+.locdel{flex:0 0 38px;background:var(--panel2);border:1px solid var(--line);color:var(--bad);border-radius:9px;font-size:13px;cursor:pointer}
+.locpurge{width:100%;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.4);color:var(--bad);border-radius:9px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;margin:4px 0 8px}
 .locempty{color:var(--muted);text-align:center;padding:24px;font-size:13px}
-.legend .sw{width:26px;height:14px;border-radius:3px;display:inline-block;border:1px solid rgba(255,255,255,.35);box-shadow:0 1px 2px rgba(0,0,0,.4)}
+.legend .sw{width:26px;height:14px;border-radius:3px;display:inline-block;border:1px solid var(--swb);box-shadow:0 1px 2px rgba(0,0,0,.4)}
 .legend .grp{display:flex;align-items:center;gap:5px;margin-right:12px}
 
 /* Explainer */
@@ -209,21 +238,21 @@ summary{padding:13px 14px;cursor:pointer;font-weight:700;font-size:14px;list-sty
 summary::-webkit-details-marker{display:none}
 summary::after{content:"＋";color:var(--muted)}
 details[open] summary::after{content:"－"}
-.exp{padding:0 14px 14px;font-size:13.5px;color:#cdd9e6}
+.exp{padding:0 14px 14px;font-size:13.5px;color:var(--ink2)}
 .exp p{margin:8px 0}
 .exp .warnbox{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);
-  border-radius:10px;padding:10px 12px;color:#ffd98a;font-size:12.5px}
-.exp code{font-family:var(--mono);background:#0a1521;padding:1px 5px;border-radius:4px;font-size:12px}
+  border-radius:10px;padding:10px 12px;color:var(--t-amber);font-size:12.5px}
+.exp code{font-family:var(--mono);background:var(--well);padding:1px 5px;border-radius:4px;font-size:12px}
 .qrbox{margin-top:16px;padding-top:16px;border-top:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:8px}
 .qrbox svg{display:block;border-radius:8px;background:#fff;padding:8px;box-shadow:0 2px 8px rgba(0,0,0,.3)}
 .qrcap{font-size:12px;color:var(--muted);text-align:center}
-.qrlink{font-size:12px;color:var(--accent);text-decoration:none;font-family:var(--mono);word-break:break-all;text-align:center}
+.qrlink{font-size:12px;color:var(--accent-t);text-decoration:none;font-family:var(--mono);word-break:break-all;text-align:center}
 .qrlink:active{opacity:.6}
 
 /* status / toast */
 #status{text-align:center;font-size:12.5px;color:var(--muted);min-height:18px;margin-top:8px;font-family:var(--mono)}
 .credit{text-align:center;font-size:11px;color:var(--muted);line-height:1.6;margin-top:6px;padding:0 4px}
-.credit a{color:#9db4cf;text-decoration:none;border-bottom:1px dotted #46617f}
+.credit a{color:var(--ink3);text-decoration:none;border-bottom:1px dotted var(--muted)}
 .credit a:active{opacity:.6}
 .spin{display:inline-block;width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--accent);
   border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:6px}
@@ -301,7 +330,10 @@ body.picking{overflow:hidden}
       <h1 id="t-title">风的累积</h1>
       <div class="sub" id="t-sub">雷暴 · 降雨 · 强风预警</div>
     </div>
-    <button class="langbtn" id="langBtn" onclick="toggleLang()">🌐 中文</button>
+    <div class="hdrbtns">
+      <button class="langbtn" id="themeBtn" onclick="toggleTheme()">🌓</button>
+      <button class="langbtn" id="langBtn" onclick="toggleLang()">🌐 中文</button>
+    </div>
   </header>
 
   <div class="controls">
@@ -997,16 +1029,48 @@ function gridBounds(){
 // With isobars on, the view opens out to the 6° pressure box so the lines are actually on screen.
 function fitGrid(){ if(map) map.fitBounds(isoOn?isoBounds():gridBounds(), {padding:isoOn?[4,4]:[24,24], animate:false}); }
 
+/* ================= THEME (light / dark) ================= */
+// wa_theme: 'light' | 'dark' | absent = follow the system. The 🌓 button cycles auto → light → dark.
+let baseTiles=null, refTiles=null;
+function themeChoice(){ try{ const t=localStorage.getItem('wa_theme'); return (t==='light'||t==='dark')?t:'auto'; }catch(e){ return 'auto'; } }
+function systemTheme(){ return (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark'; }
+function currentTheme(){ return document.documentElement.getAttribute('data-theme')==='light' ? 'light' : 'dark'; }
+function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function tileUrl(kind){
+  return `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${currentTheme()==='light'?'Light':'Dark'}_Gray_${kind}/MapServer/tile/{z}/{y}/{x}`;
+}
+function themeBtnLabel(){
+  const ch=themeChoice(), b=document.getElementById('themeBtn'); if(!b) return;
+  b.textContent = ch==='light'?'☀️':ch==='dark'?'🌙':'🌓';
+  const name = ch==='light'?T('浅色','Light','Cerah'):ch==='dark'?T('深色','Dark','Gelap'):T('跟随系统','Auto (system)','Auto (sistem)');
+  b.title = T('外观：','Appearance: ','Paparan: ')+name; b.setAttribute('aria-label', b.title);
+}
+function applyTheme(){
+  const ch=themeChoice(), t = ch==='auto' ? systemTheme() : ch, was=currentTheme();
+  document.documentElement.setAttribute('data-theme', t);
+  const m=document.querySelector('meta[name="theme-color"]'); if(m) m.setAttribute('content', cssVar('--base'));
+  themeBtnLabel();
+  if(t!==was){
+    if(baseTiles) baseTiles.setUrl(tileUrl('Base'));
+    if(refTiles)  refTiles.setUrl(tileUrl('Reference'));
+    if(data) render();                 // canvas chart + isobars take their colours from the theme
+  }
+}
+function toggleTheme(){
+  const next={auto:'light', light:'dark', dark:'auto'}[themeChoice()];
+  try{ if(next==='auto') localStorage.removeItem('wa_theme'); else localStorage.setItem('wa_theme', next); }catch(e){}
+  applyTheme();
+  toast(document.getElementById('themeBtn').title);
+}
+if(window.matchMedia){ const mq=matchMedia('(prefers-color-scheme: light)'), f=()=>applyTheme();
+  if(mq.addEventListener) mq.addEventListener('change', f); else if(mq.addListener) mq.addListener(f); }
+
 function initMap(){
   map = L.map('map',{zoomControl:true, attributionControl:false}).setView([center.lat,center.lon], 9);
   map.zoomControl.setPosition('topleft');
-  // Keyless dark basemap: Esri World Dark Gray Canvas (base + reference labels). No API key.
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',{
-    maxZoom:16
-  }).addTo(map);
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',{
-    maxZoom:16
-  }).addTo(map);
+  // Keyless basemap: Esri World Dark / Light Gray Canvas (base + reference labels), by theme.
+  baseTiles = L.tileLayer(tileUrl('Base'),{ maxZoom:16 }).addTo(map);
+  refTiles  = L.tileLayer(tileUrl('Reference'),{ maxZoom:16 }).addTo(map);
   cellLayer = L.layerGroup().addTo(map);
   arrowLayer = L.layerGroup().addTo(map);
   centerPin = L.marker([center.lat,center.lon],{
@@ -1283,20 +1347,20 @@ function categoryOf(c){
 // Band qualifier for MFC (g/kg·h): negative = drying/diverging moisture
 function categoryMFC(m){
   const B=I18N[lang].bands;
-  if(m<=0)            return {label:B.dry,  col:'var(--div)'};
+  if(m<=0)            return {label:B.dry,  col:'var(--div-t)'};
   if(m< MFC_TH.weak)  return {label:'',     col:'var(--muted)'};
-  if(m< MFC_TH.mod)   return {label:B.weak, col:'var(--cvg1)'};
-  if(m< MFC_TH.strong)return {label:B.mod,  col:'var(--cvg2)'};
-  return {label:B.strong, col:'var(--cvg3)'};
+  if(m< MFC_TH.mod)   return {label:B.weak, col:'var(--cvg1-t)'};
+  if(m< MFC_TH.strong)return {label:B.mod,  col:'var(--cvg2-t)'};
+  return {label:B.strong, col:'var(--cvg3-t)'};
 }
 // Band qualifier for derived ascent (cm/s): negative = sinking
 function categoryAsc(a){
   const B=I18N[lang].bands;
-  if(a<=0)             return {label:B.sink, col:'var(--div)'};
+  if(a<=0)             return {label:B.sink, col:'var(--div-t)'};
   if(a< ASC_TH.weak)   return {label:'',     col:'var(--muted)'};
-  if(a< ASC_TH.mod)    return {label:B.weak, col:'var(--cvg1)'};
-  if(a< ASC_TH.strong) return {label:B.mod,  col:'var(--cvg2)'};
-  return {label:B.strong, col:'var(--cvg3)'};
+  if(a< ASC_TH.mod)    return {label:B.weak, col:'var(--cvg1-t)'};
+  if(a< ASC_TH.strong) return {label:B.mod,  col:'var(--cvg2-t)'};
+  return {label:B.strong, col:'var(--cvg3-t)'};
 }
 
 /* Ingredients-based storm gating: lift (convergence) + moisture (RH) + instability (CAPE).
@@ -1536,8 +1600,8 @@ function drawArrows(hr){
     const rot=(dir+180)%360;
     const html=`<div class="arrow" style="transform:rotate(${rot}deg)">
       <svg width="22" height="${len+8}" viewBox="0 0 22 ${len+8}">
-        <line x1="11" y1="${len+6}" x2="11" y2="6" stroke="#cbd5e1" stroke-width="2"/>
-        <path d="M11 2 L6 11 L11 8 L16 11 Z" fill="#e2e8f0"/>
+        <line x1="11" y1="${len+6}" x2="11" y2="6" stroke="currentColor" stroke-width="2"/>
+        <path d="M11 2 L6 11 L11 8 L16 11 Z" fill="currentColor"/>
       </svg></div>`;
     L.marker([g.lat,g.lon],{icon:L.divIcon({className:'',html,iconSize:[22,len+8],iconAnchor:[11,(len+8)/2]}),interactive:false})
       .addTo(arrowLayer);
@@ -1552,7 +1616,7 @@ function drawReadout(C, hr){
   document.getElementById('r-val').textContent = (cc>0?'+':'')+disp;
   const cel=document.getElementById('r-cat');
   cel.textContent=cat.label; cel.style.background=cat.col;
-  cel.style.color = (cat.k==='calm')?'#0d1b2a':(cat.k==='diverge'?'#04202e':'#231400');
+  cel.style.color = (cat.k==='calm')?'var(--on-muted)':(cat.k==='diverge'?'#04202e':(cat.k==='strong'?'#fff':'#231400'));
   const ingM = stormIngredients(hr);
   // convergence depth reliability tag
   const dtag=document.getElementById('r-depth'); const D=I18N[lang].depth;
@@ -1743,7 +1807,7 @@ function drawSpark(){
   S.forEach((o,i)=>{ if(o.lvl>=3){ x.fillStyle=o.lvl>=4?'rgba(220,38,38,.22)':'rgba(251,146,60,.16)';
     x.fillRect(px(i)-bw/2,0,bw,H); } });
   // zero line
-  x.strokeStyle='#24405c'; x.lineWidth=1; x.beginPath(); x.moveTo(0,mid); x.lineTo(W,mid); x.stroke();
+  x.strokeStyle=cssVar('--line'); x.lineWidth=1; x.beginPath(); x.moveTo(0,mid); x.lineTo(W,mid); x.stroke();
   // area
   x.beginPath(); x.moveTo(px(0),py(ser[0]));
   ser.forEach((v,i)=>x.lineTo(px(i),py(v)));
@@ -1764,7 +1828,7 @@ function drawSpark(){
   x.strokeStyle='#f59e0b'; x.lineWidth=2; x.stroke();
 }
 
-function drawLegend(){ drawOverlayLegend(); const el=document.getElementById('legend'), t=isoLegendText(); if(el&&t) el.innerHTML+=`<span class="grp" style="color:#f1f5f9">${t}</span>`; }
+function drawLegend(){ drawOverlayLegend(); const el=document.getElementById('legend'), t=isoLegendText(); if(el&&t) el.innerHTML+=`<span class="grp" style="color:var(--ink)">${t}</span>`; }
 function drawOverlayLegend(){
   const L=I18N[lang];
   const el=document.getElementById('legend');
@@ -1779,7 +1843,7 @@ function drawOverlayLegend(){
       `<span class="grp"><span class="sw" style="background:rgb(34,120,66)"></span>${T('低','low','rendah')}</span>`+
       `<span class="grp"><span class="sw" style="background:rgb(196,176,96)"></span>${T('中','mid','sederhana')}</span>`+
       `<span class="grp"><span class="sw" style="background:rgb(124,74,42)"></span>${T('高','high','tinggi')}</span>`+
-      `<span class="grp" style="color:#8ba3bd">${T('海拔','elevation','ketinggian')}${range}</span>`;
+      `<span class="grp" style="color:var(--muted)">${T('海拔','elevation','ketinggian')}${range}</span>`;
     return;
   }
   if(overlayMode==='combo'){
@@ -1789,7 +1853,7 @@ function drawOverlayLegend(){
       `<span class="grp"><span class="sw" style="background:#fde68a"></span>${V.partial}</span>`+
       `<span class="grp"><span class="sw" style="background:#fb923c"></span>${V.watch}</span>`+
       `<span class="grp"><span class="sw" style="background:#dc2626"></span>${V.likely}</span>`+
-      `<span class="grp" style="color:#8ba3bd">${T('三要素叠加','ingredients overlap','pertindihan ramuan')}</span>`+
+      `<span class="grp" style="color:var(--muted)">${T('三要素叠加','ingredients overlap','pertindihan ramuan')}</span>`+
       `<span class="grp"><span class="sw" style="background:#ffd27a;height:3px;width:20px;border:none"></span>${T('辐合线','conv line','garis penumpuan')}</span>`;
     return;
   }
@@ -1799,7 +1863,7 @@ function drawOverlayLegend(){
       `<span class="grp"><span class="sw" style="background:#34d399"></span>500</span>`+
       `<span class="grp"><span class="sw" style="background:#fbbf24"></span>1500</span>`+
       `<span class="grp"><span class="sw" style="background:#dc2626"></span>3000+ J/kg</span>`+
-      `<span class="grp" style="color:#8ba3bd">${T('对流有效位能','CAPE','CAPE')}</span>`;
+      `<span class="grp" style="color:var(--muted)">${T('对流有效位能','CAPE','CAPE')}</span>`;
     return;
   }
   if(overlayMode==='mfc'){
@@ -1808,7 +1872,7 @@ function drawOverlayLegend(){
       `<span class="grp"><span class="sw" style="background:#fde68a"></span>${T('弱','weak','lemah')}</span>`+
       `<span class="grp"><span class="sw" style="background:#fb923c"></span>${T('中','mod','sederhana')}</span>`+
       `<span class="grp"><span class="sw" style="background:#dc2626"></span>5+ g/kg·h</span>`+
-      `<span class="grp" style="color:#8ba3bd">${T('水汽通量辐合','moisture-flux conv','penumpuan fluks lembapan')}</span>`;
+      `<span class="grp" style="color:var(--muted)">${T('水汽通量辐合','moisture-flux conv','penumpuan fluks lembapan')}</span>`;
     return;
   }
   el.innerHTML =
@@ -1816,7 +1880,7 @@ function drawOverlayLegend(){
     `<span class="grp"><span class="sw" style="background:#fde68a"></span>${L.cats.weak}</span>`+
     `<span class="grp"><span class="sw" style="background:#fb923c"></span>${L.cats.mod}</span>`+
     `<span class="grp"><span class="sw" style="background:#dc2626"></span>${L.cats.strong}</span>`+
-    `<span class="grp" style="color:#8ba3bd">↑ = ${T('风向','wind','angin')}</span>`+
+    `<span class="grp" style="color:var(--muted)">↑ = ${T('风向','wind','angin')}</span>`+
     `<span class="grp"><span class="sw" style="background:#ffd27a;height:3px;width:20px;border:none"></span>${T('辐合线','conv line','garis penumpuan')}</span>`;
 }
 function setOverlay(mode){
@@ -2010,7 +2074,7 @@ function drawIso(){
     const major = iv>=1 ? level%(iv*5)===0 : Number.isInteger(level);
     let longest=null;
     lines.forEach(ln=>{ const ll=isoSmooth(ln).map(toLL);
-      L.polyline(ll,{pane:'isop',color:'#f1f5f9',weight:major?2:1.1,opacity:major?.95:.7,interactive:false}).addTo(isoLayer);
+      L.polyline(ll,{pane:'isop',color:cssVar('--iso'),weight:major?2:1.1,opacity:major?.95:.7,interactive:false}).addTo(isoLayer);
       if(!longest||ll.length>longest.length) longest=ll; });
     if(longest && longest.length>=4){
       const txt = String(level);
@@ -2241,6 +2305,7 @@ function applyLang(){
   document.getElementById('t-pr').textContent = L.pr;
   document.getElementById('t-mslp').textContent = T('海平面气压','sea-level','aras laut');
   document.getElementById('isoBtn').title = T('等压线','Isobars','Isobar');
+  themeBtnLabel();
   document.getElementById('t-tl').textContent = L.tl;
   document.getElementById('t-exp-h').textContent = L.expH;
   document.getElementById('exp1').innerHTML = L.exp1;
@@ -2524,6 +2589,7 @@ function setupSpark(){
 }
 
 document.documentElement.lang = LANGS[lang];
+applyTheme();
 applyLang();
 initMap();
 document.getElementById('isoBtn').classList.toggle('on', isoOn);
