@@ -349,7 +349,7 @@ body.picking{overflow:hidden}
 
   <div class="controls">
     <button class="btn geo" id="geoBtn" onclick="useMyLocation()">📍 <span id="t-geo">当前位置</span></button>
-    <button class="btn primary" id="refreshBtn" onclick="loadData()">↻ <span id="t-refresh">更新</span></button>
+    <button class="btn primary" id="refreshBtn" onclick="refreshAll()">↻ <span id="t-refresh">更新</span></button>
   </div>
   <div class="manualrow">
     <div class="latlon">
@@ -1137,9 +1137,23 @@ async function fetchElevation(lats, lons, signal){
   if(out.length===lats.length){ elevCache={sig, elev:out}; return out; }
   throw new Error("elev length mismatch "+out.length+"/"+lats.length);
 }
+// Every loadData call gets a number. Background results (terrain, ensemble) carry the number of
+// the request they belong to and are dropped once a newer request has started.
+let loadSeq=0;
+// The side fields (ensemble, pressure) are reused for the same spot only while this fresh.
+const SIDE_TTL_MS = 60*60*1000;
+// The Refresh button: also refetch the ensemble and the pressure field, not just the forecast.
+function refreshAll(){
+  ensData=null; ensSig=null;
+  if(isoData) isoData.fetchedAt=0;
+  isoErrSig=null;
+  loadData();
+}
 async function loadData(){
   if(inflight){ try{ inflight.abort(); }catch(e){} }
   const ac = new AbortController(); inflight = ac;
+  const seq = ++loadSeq; ensReq++;                 // anything still in flight for an older request is now void
+  const reqCenter = { lat:center.lat, lon:center.lon, name:center.name||null };   // the spot THIS request is for
   setStatus(true, ()=>I18N[lang].loading);
   document.getElementById('refreshBtn').disabled = true;
   const {lats,lons,pts} = gridCoords();
@@ -1196,16 +1210,18 @@ async function loadData(){
     hourIdx = nearestHourIndex(time);
     document.getElementById('hourSlider').max = time.length-1;
     document.getElementById('hourSlider').value = hourIdx;
-    try{ localStorage.setItem("wa_cache2", JSON.stringify({center, data, at:Date.now()})); }catch(e){}
+    try{ localStorage.setItem("wa_cache2", JSON.stringify({center:reqCenter, data, at:Date.now()})); }catch(e){}
     render();
     setStatus(false, "");
     loadConfidence();   // background auto-load (cached per location)
     if(!elevReady){
       fetchElevation(lats, lons, ac.signal).then(elev=>{
-        if(data!==thisData || !elev || elev.length!==grid.length) return;   // superseded meanwhile
+        // Dropped if another request has started since (even one still loading: `data` would
+        // still be this forecast, but `center` already belongs to the new spot).
+        if(seq!==loadSeq || data!==thisData || !elev || elev.length!==grid.length) return;
         grid.forEach((g,k)=>{ g.elev = elev[k]; });
         seriesCache=null;
-        try{ localStorage.setItem("wa_cache2", JSON.stringify({center, data, at:Date.now()})); }catch(e){}
+        try{ localStorage.setItem("wa_cache2", JSON.stringify({center:reqCenter, data:thisData, at:Date.now()})); }catch(e){}
         render();
       }).catch(()=>{ /* terrain optional — weather still works without it */ });
     }
@@ -1251,6 +1267,7 @@ function failText(why){
   return L.offline;
 }
 function showCached(c, why){
+  ensReq++;                                      // a late ensemble answer must not land on the cached view
   center = { lat:c.center.lat, lon:c.center.lon, name:c.center.name||null };
   data = c.data; seriesCache=null;
   ensData=null; ensSig=null; confShown=false;
@@ -2056,7 +2073,7 @@ function isoSmooth(line){
 }
 async function loadIso(){
   const o=isoOrigin(), sig=o.lat0+','+o.lon0;
-  if(isoData && isoData.sig===sig){ isoState=''; return; }
+  if(isoData && isoData.sig===sig && Date.now()-isoData.fetchedAt < SIDE_TTL_MS){ isoState=''; return; }
   if(isoWant===sig) return;                      // already on its way
   isoWant=sig; isoState='loading'; isoData=null; drawLegend();
   const lats=[], lons=[];
@@ -2071,7 +2088,7 @@ async function loadIso(){
     if(isoWant!==sig) return;                    // the pin moved while this was loading
     const at={}; arr[0].hourly.time.forEach((t,i)=>{ at[t]=i; });
     const P=[]; for(let r=0;r<ISO.n;r++){ P.push([]); for(let c=0;c<ISO.n;c++) P[r].push(arr[r*ISO.n+c].hourly.pressure_msl); }
-    isoData={sig, at, P, lat0:o.lat0, lon0:o.lon0}; isoState=''; isoErrSig=null;
+    isoData={sig, at, P, lat0:o.lat0, lon0:o.lon0, fetchedAt:Date.now()}; isoState=''; isoErrSig=null;
   }catch(e){ if(isoWant!==sig) return; isoState='error'; isoErrSig=sig; }
   isoWant=null;
   drawIso(); drawLegend();
@@ -2085,7 +2102,7 @@ function drawIso(){
   isoLayer.clearLayers(); isoShown=null;
   if(!isoOn || !data) return;
   const o=isoOrigin();
-  if(!isoData || isoData.sig!==o.lat0+','+o.lon0){ if(isoErrSig!==o.lat0+','+o.lon0) loadIso(); return; }   // a failed spot is retried by the 〰 button
+  if(!isoData || isoData.sig!==o.lat0+','+o.lon0 || Date.now()-isoData.fetchedAt >= SIDE_TTL_MS){ if(isoErrSig!==o.lat0+','+o.lon0) loadIso(); return; }   // a failed spot is retried by the 〰 button
   const hr=isoData.at[data.time[hourIdx]];       // matched on the timestamp, never on array position
   if(hr===undefined){ isoShown={noHour:true}; return; }
   const F=isoData.P.map(row=>row.map(series=>series[hr]));
@@ -2379,15 +2396,18 @@ function applyLang(){
 
 /* ================= ECMWF ENSEMBLE CONFIDENCE ================= */
 let ensData=null, ensSig=null, confShown=false;
-async function fetchEnsemble(){
-  const sig=center.lat.toFixed(3)+','+center.lon.toFixed(3);
-  if(ensSig===sig && ensData) return ensData;
+let ensReq=0;                // bumped whenever the pending ensemble answer stops being wanted
+async function fetchEnsemble(req){
+  // Coordinates are fixed here: the request may still be running after the pin has moved.
+  const lat=center.lat, lon=center.lon;
+  const sig=lat.toFixed(3)+','+lon.toFixed(3);
+  if(ensSig===sig && ensData && Date.now()-ensData.fetchedAt < SIDE_TTL_MS) return ensData;
   // Moisture is read at 925 hPa — the same level the deterministic gate uses — so the bar is
   // comparable with the verdict above. 2 m RH (wetter near the ground, so optimistic) is only
   // the fallback when the API refuses or returns no 925 hPa series; the note says which was used.
   const get=async vars=>{
     const res=await fetch(`https://ensemble-api.open-meteo.com/v1/ensemble`
-      +`?latitude=${center.lat.toFixed(4)}&longitude=${center.lon.toFixed(4)}`
+      +`?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}`
       +`&hourly=${vars}&models=${ENSEMBLE.model}&forecast_days=3&timezone=${TZ}`);
     if(!res.ok) throw new Error("ens HTTP "+res.status);
     const json=await res.json();
@@ -2405,7 +2425,8 @@ async function fetchEnsemble(){
   const rhKeys=[RH].concat(Object.keys(h).filter(k=>k.indexOf(RH+'_member')===0 && /^\d+$/.test(k.slice(RH.length+7))).sort());
   const pairs=rhKeys.map(k=>({rh:h[k], cape:h['cape'+k.slice(RH.length)]})).filter(p=>Array.isArray(p.rh)&&Array.isArray(p.cape));
   const at={}; (h.time||[]).forEach((t,i)=>{ at[t]=i; });   // stamp → index on the ENSEMBLE's own time axis
-  ensData={pairs, at, rhLevel: RH===R925?'925':'2m'}; ensSig=sig;
+  if(req!==ensReq) return null;                  // answered too late: another spot / a newer request owns the panel
+  ensData={pairs, at, rhLevel: RH===R925?'925':'2m', fetchedAt:Date.now()}; ensSig=sig;
   return ensData;
 }
 // Member agreement on the storm ENVIRONMENT (moisture + instability) at one forecast stamp.
@@ -2432,8 +2453,9 @@ function loadConfidence(){
   if(!data) return;
   const body=document.getElementById('confBody');
   body.innerHTML='<span class="spin"></span> '+(T('读取集合…','loading ensemble…','memuat ensembel…'));
-  fetchEnsemble().then(()=>{ confShown=true; renderConfidence(); })
-    .catch(e=>{ confShown=false; body.innerHTML='<span style="color:var(--warn)">'+(T('集合数据不可用','ensemble data unavailable','data ensembel tiada'))+' <span style="opacity:.7;font-size:11px">('+(e&&e.message?e.message:'error')+')</span></span>'; });
+  const req=++ensReq;
+  fetchEnsemble(req).then(d=>{ if(req!==ensReq || !d) return; confShown=true; renderConfidence(); })
+    .catch(e=>{ if(req!==ensReq) return; confShown=false; body.innerHTML='<span style="color:var(--warn)">'+(T('集合数据不可用','ensemble data unavailable','data ensembel tiada'))+' <span style="opacity:.7;font-size:11px">('+(e&&e.message?e.message:'error')+')</span></span>'; });
 }
 function renderConfidence(){
   if(!confShown || !ensData) return;

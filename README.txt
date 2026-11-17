@@ -22,6 +22,17 @@ UPDATING
   the new version simply appears on the next launch.
   Check a change before pushing:  node --check sw.js
 
+WHAT CHANGED (second review: late answers and stale side data)
+  1. A slow ensemble answer for the previous spot could overwrite the confidence
+     panel of the spot you had moved to. Each request is now numbered and a late
+     answer is dropped; the request also keeps its own coordinates.
+  2. A slow terrain answer for the previous spot could save that spot's forecast
+     under the new spot's coordinates. Terrain answers are dropped once a newer
+     forecast request has started, and the cache is saved with the coordinates the
+     forecast was requested for.
+  3. Refresh now refetches the ensemble and the pressure field as well as the
+     forecast. Without Refresh they are reused for the same spot for up to an hour.
+
 WHAT CHANGED (status line follows the language, and says why)
   - The status banner and the location line under the coordinates are re-worded when
     the language is switched. Before, a banner raised in Chinese stayed Chinese.
