@@ -1142,11 +1142,23 @@ async function fetchElevation(lats, lons, signal){
 let loadSeq=0;
 // The side fields (ensemble, pressure) are reused for the same spot only while this fresh.
 const SIDE_TTL_MS = 60*60*1000;
-// The Refresh button: also refetch the ensemble and the pressure field, not just the forecast.
+// The Refresh button refetches the forecast, the ensemble and the pressure field — but each one
+// only if its copy is at least REFRESH_MIN_MS old. Tapping Refresh repeatedly then costs nothing
+// (every grid point counts against Open-Meteo's daily quota, and the model itself only updates
+// a few times a day). A failed or cached view is never "fresh", so Refresh always retries it.
+const REFRESH_MIN_MS = 5*60*1000;
+let liveAt=0, liveSig=null;      // when, and for which spot, the forecast on screen was fetched live
 function refreshAll(){
-  ensData=null; ensSig=null;
-  if(isoData) isoData.fetchedAt=0;
-  isoErrSig=null;
+  const now=Date.now(), sig=center.lat.toFixed(4)+','+center.lon.toFixed(4);
+  if(ensData && now-ensData.fetchedAt >= REFRESH_MIN_MS){ ensData=null; ensSig=null; }
+  if(isoData && now-isoData.fetchedAt >= REFRESH_MIN_MS) isoData.fetchedAt=0;
+  isoErrSig=null;                                   // a failed pressure request is retried
+  if(data && !inflight && liveSig===sig && now-liveAt < REFRESH_MIN_MS){
+    if(!ensData) loadConfidence();                  // expired above, or it failed last time
+    drawIso(); drawLegend();
+    toast(T('已是最新 · ','Up to date · updated ','Sudah terkini · dikemas kini ')+agoText(now-liveAt)+T('更新','',''));
+    return;
+  }
   loadData();
 }
 async function loadData(){
@@ -1211,6 +1223,7 @@ async function loadData(){
     document.getElementById('hourSlider').max = time.length-1;
     document.getElementById('hourSlider').value = hourIdx;
     try{ localStorage.setItem("wa_cache2", JSON.stringify({center:reqCenter, data, at:Date.now()})); }catch(e){}
+    liveAt=Date.now(); liveSig=reqCenter.lat.toFixed(4)+','+reqCenter.lon.toFixed(4);
     render();
     setStatus(false, "");
     loadConfidence();   // background auto-load (cached per location)
@@ -1267,6 +1280,7 @@ function failText(why){
   return L.offline;
 }
 function showCached(c, why){
+  liveAt=0; liveSig=null;                        // what is on screen is not a live fetch
   ensReq++;                                      // a late ensemble answer must not land on the cached view
   center = { lat:c.center.lat, lon:c.center.lon, name:c.center.name||null };
   data = c.data; seriesCache=null;

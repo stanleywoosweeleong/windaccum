@@ -32,6 +32,8 @@ WHAT CHANGED (second review: late answers and stale side data)
      forecast was requested for.
   3. Refresh now refetches the ensemble and the pressure field as well as the
      forecast. Without Refresh they are reused for the same spot for up to an hour.
+     To protect the Open-Meteo quota, Refresh skips anything fetched less than
+     5 minutes ago and says "Up to date"; a failed or cached view is always retried.
 
 WHAT CHANGED (status line follows the language, and says why)
   - The status banner and the location line under the coordinates are re-worded when
