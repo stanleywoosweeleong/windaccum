@@ -160,6 +160,8 @@ input[type=range]{width:100%;margin:8px 0 2px;accent-color:var(--accent)}
 .irrow{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
 .irbtn{font-size:12.5px;padding:7px 12px}
 .irbtn.on{background:var(--accent);color:#231400;border-color:var(--accent)}
+.isolab{font:700 10.5px/1 var(--mono);color:#f1f5f9;white-space:nowrap;text-align:center;
+  text-shadow:0 0 3px #0a1521,0 0 3px #0a1521,0 0 5px #0a1521}
 .irtime{font-size:12px;color:var(--muted);font-family:var(--mono)}
 .irtime.irresume{color:var(--accent);cursor:pointer;font-weight:700}
 .iropacity{flex:1;min-width:110px;accent-color:var(--accent)}
@@ -333,6 +335,7 @@ body.picking{overflow:hidden}
     <button class="btn irbtn" id="irBtn" onclick="toggleIR()">🛰 <span id="t-ir">卫星红外</span></button>
     <button class="btn irbtn" id="locBtn" onclick="openLocs()">📍 <span id="t-loc">地点</span></button>
     <button class="btn irbtn on" id="seedBtn" onclick="toggleSeeds()" title="markers">★</button>
+    <button class="btn irbtn" id="isoBtn" onclick="toggleIso()" title="isobars">〰</button>
     <span class="irtime" id="irTime" onclick="irResume()"></span>
     <input type="range" id="irOpacity" class="iropacity" min="15" max="100" value="60" oninput="setIrOpacity(this.value)" style="display:none">
   </div>
@@ -364,6 +367,7 @@ body.picking{overflow:hidden}
       <span><b id="r-wind">—</b> <span id="t-wind">风</span></span>
       <span><b id="r-rh">—</b> <span id="t-rh">湿度</span> <b id="r-rh-cat" class="mcat"></b></span>
       <span><b id="r-pr">—</b> <span id="t-pr">降水</span> <b id="r-pr-cat" class="mcat"></b></span>
+      <span id="r-mslp-wrap" style="display:none"><b id="r-mslp">—</b> hPa <span id="t-mslp">海平面气压</span> <span id="r-mslp-tend"></span></span>
     </div>
   </div>
 
@@ -489,6 +493,10 @@ const HIMAWARI = {
 const TRANSPARENT_PX='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 // IR saturation keying: grey (low-sat, clear/warm) → transparent; coloured cold tops kept
 const IR_SATMIN=0.10, IR_SATFULL=0.45;
+// Isobars: mean-sea-level pressure on its OWN grid. 13x13 at 0.5° = a 6° (~660 km) box, because
+// across the 1.6° convergence grid tropical MSLP varies by well under 1 hPa and would contour to
+// nothing. Interval anchors on 1 hPa; finer on a slack field, coarser above maxLines.
+const ISO = { n:13, step:0.5, snap:0.25, maxLines:14, minLines:3 };
 /* ---- One clock: Malaysia Standard Time (UTC+8, no daylight saving) ----
    Every forecast request asks for TZ, so the API returns naive stamps like "2026-08-07T15:00"
    that are MYT wall-clock. They are NEVER handed to new Date(stamp), which would read them in
@@ -986,7 +994,8 @@ function gridBounds(){
   const d = ((GRID_N-1)/2)*SPACING;
   return [[center.lat-d, center.lon-d],[center.lat+d, center.lon+d]];
 }
-function fitGrid(){ if(map) map.fitBounds(gridBounds(), {padding:[24,24], animate:false}); }
+// With isobars on, the view opens out to the 6° pressure box so the lines are actually on screen.
+function fitGrid(){ if(map) map.fitBounds(isoOn?isoBounds():gridBounds(), {padding:isoOn?[4,4]:[24,24], animate:false}); }
 
 function initMap(){
   map = L.map('map',{zoomControl:true, attributionControl:false}).setView([center.lat,center.lon], 9);
@@ -1062,12 +1071,13 @@ async function loadData(){
   // Winds/T/RH need pressure levels → IFS 0.25°. CAPE/precip are surface → sharper on IFS HRES 9km.
   // /v1/ecmwf serves best-per-variable automatically (9km surface + 0.25° upper-air).
   const vars = `wind_speed_925hPa,wind_direction_925hPa,wind_speed_850hPa,wind_direction_850hPa,`
-    + `temperature_925hPa,relative_humidity_925hPa,cape,precipitation,wind_gusts_10m`;
-  const url = CAPE_HIRES
-    ? `https://api.open-meteo.com/v1/ecmwf?latitude=${lats.join(',')}&longitude=${lons.join(',')}`
-      + `&hourly=${vars}&wind_speed_unit=ms&timezone=${TZ}`
-    : `https://api.open-meteo.com/v1/forecast?latitude=${lats.join(',')}&longitude=${lons.join(',')}`
-      + `&hourly=${vars}&models=ecmwf_ifs025&forecast_days=3&wind_speed_unit=ms&timezone=${TZ}`;
+    + `temperature_925hPa,relative_humidity_925hPa,cape,precipitation,wind_gusts_10m,pressure_msl`;
+  // past_days=1: the day before is needed only for the 24 h pressure tendency in the readout.
+  const url = (CAPE_HIRES
+    ? `https://api.open-meteo.com/v1/ecmwf?latitude=${lats.join(',')}&longitude=${lons.join(',')}&hourly=${vars}`
+    : `https://api.open-meteo.com/v1/forecast?latitude=${lats.join(',')}&longitude=${lons.join(',')}&hourly=${vars}`
+      + `&models=ecmwf_ifs025&forecast_days=3`)
+    + `&past_days=1&wind_speed_unit=ms&timezone=${TZ}`;
   try{
     const res = await fetch(url, {signal:ac.signal});
     if(!res.ok) throw new Error("HTTP "+res.status);
@@ -1098,7 +1108,12 @@ async function loadData(){
     const elevSig = lats.join(',')+'|'+lons.join(',');
     const elevReady = elevCache.sig===elevSig && elevCache.elev && elevCache.elev.length===grid.length;
     if(elevReady) grid.forEach((g,k)=>{ g.elev = elevCache.elev[k]; });
-    data = { time, grid, hours:time.length };
+    // Sea-level pressure at the centre point, plus the same series 24 h earlier (the model's
+    // own values for the previous day) so the readout can show a 24 h tendency.
+    let mslp=null, mslpPrev=null;
+    { const kc=pts.findIndex(p=>p.i===CENTER&&p.j===CENTER), pf=kc>=0?arr[kc].hourly.pressure_msl:null;
+      if(pf){ mslp=win(pf); mslpPrev=time.map((_,k)=>{ const v=pf[startIdx+k-24]; return v==null?null:v; }); } }
+    data = { time, grid, hours:time.length, mslp, mslpPrev };
     const thisData = data;
     seriesCache=null;
     confShown=false; { const cb=document.getElementById('confBody'); if(cb) cb.innerHTML=''; }
@@ -1399,6 +1414,7 @@ function render(){
   const C = convergenceField(hr);
   drawCells(C);
   drawArrows(hr);
+  drawIso();
   drawReadout(C, hr);
   drawSpark();
   drawLegend();
@@ -1559,6 +1575,13 @@ function drawReadout(C, hr){
   const rPr=document.getElementById('r-pr');
   rPr.textContent=(ingM.ascent>0?'+':'')+ingM.ascent.toFixed(0); rPr.style.color=acat.col;
   const rPrCat=document.getElementById('r-pr-cat'); rPrCat.textContent=acat.label; rPrCat.style.color=acat.col;
+  { const w=document.getElementById('r-mslp-wrap'), p=data.mslp?data.mslp[hr]:null;
+    if(p==null) w.style.display='none';
+    else{ w.style.display='';
+      document.getElementById('r-mslp').textContent=p.toFixed(1);
+      const q=data.mslpPrev?data.mslpPrev[hr]:null, d=q==null?null:p-q;
+      document.getElementById('r-mslp-tend').textContent = d==null ? '' : '· 24h '+(d>0?'+':d<0?'−':'±')+Math.abs(d).toFixed(1);
+    } }
   const t=data.time[hr];
   baseTimeLabel = fmtTime(t);
   document.getElementById('r-loc').textContent =
@@ -1741,7 +1764,8 @@ function drawSpark(){
   x.strokeStyle='#f59e0b'; x.lineWidth=2; x.stroke();
 }
 
-function drawLegend(){
+function drawLegend(){ drawOverlayLegend(); const el=document.getElementById('legend'), t=isoLegendText(); if(el&&t) el.innerHTML+=`<span class="grp" style="color:#f1f5f9">${t}</span>`; }
+function drawOverlayLegend(){
   const L=I18N[lang];
   const el=document.getElementById('legend');
   if(overlayMode==='terr'){
@@ -1866,6 +1890,151 @@ function useMyLocation(auto){
 function gpsInfo(msg, err){
   const el=document.getElementById('gpsInfo');
   el.textContent=msg||""; el.classList.toggle('err', !!err);
+}
+
+/* ============ Isobars (ECMWF mean-sea-level pressure) ============
+   Marching squares over the pressure field at the selected hour. It draws the field and nothing
+   else: no low is named, no circulation classified, no centre marked.
+   Fetched only when the layer is switched on; one request per location. */
+let isoOn=(()=>{ try{ return localStorage.getItem('wa_iso')==='1'; }catch(e){ return false; } })();
+let isoData=null;            // { sig, at:{stamp→index}, P:[n][n] hourly series, lat0, lon0 }
+let isoState='';             // '', 'loading', 'error'
+let isoShown=null;           // { iv, min, max, lines } for the legend, or { noHour:true }
+let isoLayer=null, isoWant=null, isoErrSig=null;
+// Grid origin snapped to the model's 0.25° pressure grid, so every sample IS a model cell.
+function isoOrigin(){
+  const half=((ISO.n-1)/2)*ISO.step, sn=v=>Math.round(v/ISO.snap)*ISO.snap;
+  return { lat0:+(sn(center.lat)-half).toFixed(2), lon0:+(sn(center.lon)-half).toFixed(2) };
+}
+function isoBounds(){
+  const o=isoOrigin(), span=(ISO.n-1)*ISO.step;
+  return [[o.lat0,o.lon0],[o.lat0+span,o.lon0+span]];
+}
+// Interval anchored on 1 hPa; it moves only when forced.
+function isoLineCount(min,max,iv){ return Math.max(0, Math.floor(max/iv-1e-9)-Math.ceil(min/iv+1e-9)+1); }
+function isoInterval(min,max){
+  let iv=1;
+  if(isoLineCount(min,max,1)>ISO.maxLines){ for(const c of [2,4,5,10]){ iv=c; if(isoLineCount(min,max,c)<=ISO.maxLines) break; } }
+  else if(isoLineCount(min,max,1)<ISO.minLines){ for(const c of [0.5,0.25]){ iv=c; if(isoLineCount(min,max,c)>=ISO.minLines) break; } }
+  return iv;
+}
+// Marching squares for one level over F[r][c] (r = south→north, c = west→east), chained into
+// polylines of [r,c] grid coordinates. Cells with a missing corner are skipped.
+function isoContour(F, level){
+  const n=F.length, m=F[0].length, segs=[], pt={};
+  const cross=(key,r1,c1,r2,c2)=>{ const a=F[r1][c1], b=F[r2][c2];
+    if((a<level)===(b<level)) return null;
+    if(!pt[key]){ const t=(level-a)/(b-a); pt[key]=[r1+(r2-r1)*t, c1+(c2-c1)*t]; }
+    return key; };
+  for(let r=0;r<n-1;r++) for(let c=0;c<m-1;c++){
+    const a=F[r][c], b=F[r][c+1], cc=F[r+1][c+1], d=F[r+1][c];
+    if(a==null||b==null||cc==null||d==null) continue;
+    const B=cross('h'+r+'_'+c, r,c, r,c+1),       R=cross('v'+r+'_'+(c+1), r,c+1, r+1,c+1),
+          Tp=cross('h'+(r+1)+'_'+c, r+1,c, r+1,c+1), Lf=cross('v'+r+'_'+c, r,c, r+1,c);
+    const e=[B,R,Tp,Lf].filter(Boolean);
+    if(e.length===2) segs.push(e);
+    else if(e.length===4){                      // saddle: the cell-centre mean decides the pairing
+      const mid=(a+b+cc+d)/4;
+      if((mid<level)===(a<level)){ segs.push([B,R]); segs.push([Tp,Lf]); }
+      else{ segs.push([B,Lf]); segs.push([R,Tp]); }
+    }
+  }
+  const by={}; segs.forEach((sg,i)=>sg.forEach(k=>{ (by[k]=by[k]||[]).push(i); }));
+  const used=new Array(segs.length).fill(false), lines=[];
+  const walk=(key,out,push)=>{ for(;;){ const i=(by[key]||[]).find(x=>!used[x]); if(i===undefined) return;
+      used[i]=true; key=segs[i][0]===key?segs[i][1]:segs[i][0]; push.call(out,key); } };
+  segs.forEach((sg,i)=>{ if(used[i]) return; used[i]=true;
+    const keys=[sg[0],sg[1]]; walk(sg[1],keys,keys.push); walk(sg[0],keys,keys.unshift);
+    lines.push(keys.map(k=>pt[k])); });
+  return lines;
+}
+// Corner-cutting (Chaikin) so 55 km cells do not read as polygons. Open ends stay put.
+function isoSmooth(line){
+  const closed=line.length>3 && line[0][0]===line[line.length-1][0] && line[0][1]===line[line.length-1][1];
+  let p=closed?line.slice(0,-1):line;
+  for(let pass=0;pass<2;pass++){
+    const q=[], L=p.length, last=closed?L:L-1;
+    if(!closed) q.push(p[0]);
+    for(let i=0;i<last;i++){ const a=p[i], b=p[(i+1)%L];
+      q.push([a[0]*.75+b[0]*.25, a[1]*.75+b[1]*.25]); q.push([a[0]*.25+b[0]*.75, a[1]*.25+b[1]*.75]); }
+    if(!closed) q.push(p[L-1]);
+    p=q;
+  }
+  if(closed) p.push(p[0]);
+  return p;
+}
+async function loadIso(){
+  const o=isoOrigin(), sig=o.lat0+','+o.lon0;
+  if(isoData && isoData.sig===sig){ isoState=''; return; }
+  if(isoWant===sig) return;                      // already on its way
+  isoWant=sig; isoState='loading'; isoData=null; drawLegend();
+  const lats=[], lons=[];
+  for(let r=0;r<ISO.n;r++) for(let c=0;c<ISO.n;c++){ lats.push((o.lat0+r*ISO.step).toFixed(2)); lons.push((o.lon0+c*ISO.step).toFixed(2)); }
+  try{
+    // cell_selection=nearest: sea cells must not be snapped to the nearest land cell.
+    const res=await fetch(`https://api.open-meteo.com/v1/ecmwf?latitude=${lats.join(',')}&longitude=${lons.join(',')}`
+      +`&hourly=pressure_msl&cell_selection=nearest&timezone=${TZ}`);
+    if(!res.ok) throw new Error("iso HTTP "+res.status);
+    const json=await res.json(), arr=Array.isArray(json)?json:[json];
+    if(arr.length!==ISO.n*ISO.n || !arr[0].hourly || !arr[0].hourly.pressure_msl) throw new Error("iso fields unavailable");
+    if(isoWant!==sig) return;                    // the pin moved while this was loading
+    const at={}; arr[0].hourly.time.forEach((t,i)=>{ at[t]=i; });
+    const P=[]; for(let r=0;r<ISO.n;r++){ P.push([]); for(let c=0;c<ISO.n;c++) P[r].push(arr[r*ISO.n+c].hourly.pressure_msl); }
+    isoData={sig, at, P, lat0:o.lat0, lon0:o.lon0}; isoState=''; isoErrSig=null;
+  }catch(e){ if(isoWant!==sig) return; isoState='error'; isoErrSig=sig; }
+  isoWant=null;
+  drawIso(); drawLegend();
+}
+function drawIso(){
+  if(!map) return;
+  if(!isoLayer){
+    if(!map.getPane('isop')){ map.createPane('isop'); const p=map.getPane('isop'); p.style.zIndex=450; p.style.pointerEvents='none'; }
+    isoLayer=L.layerGroup().addTo(map);
+  }
+  isoLayer.clearLayers(); isoShown=null;
+  if(!isoOn || !data) return;
+  const o=isoOrigin();
+  if(!isoData || isoData.sig!==o.lat0+','+o.lon0){ if(isoErrSig!==o.lat0+','+o.lon0) loadIso(); return; }   // a failed spot is retried by the 〰 button
+  const hr=isoData.at[data.time[hourIdx]];       // matched on the timestamp, never on array position
+  if(hr===undefined){ isoShown={noHour:true}; return; }
+  const F=isoData.P.map(row=>row.map(series=>series[hr]));
+  let min=Infinity, max=-Infinity;
+  F.forEach(row=>row.forEach(v=>{ if(v!=null){ if(v<min)min=v; if(v>max)max=v; } }));
+  if(!isFinite(min)){ isoShown={noHour:true}; return; }
+  const iv=isoInterval(min,max), toLL=q=>[isoData.lat0+q[0]*ISO.step, isoData.lon0+q[1]*ISO.step];
+  let n=0;
+  for(let k=Math.ceil(min/iv+1e-9); k<=Math.floor(max/iv-1e-9); k++){
+    const level=+(k*iv).toFixed(2), lines=isoContour(F, level);
+    if(!lines.length) continue;
+    n++;
+    const major = iv>=1 ? level%(iv*5)===0 : Number.isInteger(level);
+    let longest=null;
+    lines.forEach(ln=>{ const ll=isoSmooth(ln).map(toLL);
+      L.polyline(ll,{pane:'isop',color:'#f1f5f9',weight:major?2:1.1,opacity:major?.95:.7,interactive:false}).addTo(isoLayer);
+      if(!longest||ll.length>longest.length) longest=ll; });
+    if(longest && longest.length>=4){
+      const txt = String(level);
+      L.marker(longest[Math.floor(longest.length/2)],{pane:'isop',interactive:false,keyboard:false,
+        icon:L.divIcon({className:'isolab',html:txt,iconSize:[46,12],iconAnchor:[23,6]})}).addTo(isoLayer);
+    }
+  }
+  isoShown={iv, min, max, lines:n};
+}
+function isoLegendText(){
+  if(!isoOn) return '';
+  const name='〰 '+T('等压线','isobars','isobar');
+  if(isoState==='loading') return name+' · '+T('载入中…','loading…','memuat…');
+  if(isoState==='error') return name+' · '+T('气压数据不可用','pressure data unavailable','data tekanan tiada');
+  if(!isoShown) return '';
+  if(isoShown.noHour) return name+' · '+T('此时段无气压数据','no pressure data for this hour','tiada data tekanan untuk jam ini');
+  return name+' '+T('间隔','every','setiap')+' '+isoShown.iv+' hPa · '+isoShown.min.toFixed(1)+'–'+isoShown.max.toFixed(1)+' hPa';
+}
+function toggleIso(){
+  isoOn=!isoOn;
+  try{ localStorage.setItem('wa_iso', isoOn?'1':'0'); }catch(e){}
+  document.getElementById('isoBtn').classList.toggle('on', isoOn);
+  if(isoOn && isoState==='error'){ isoState=''; isoErrSig=null; }   // switching it on again is a retry
+  fitGrid(); drawIso(); drawLegend();
 }
 
 /* ============ Himawari-9 IR loop (NASA GIBS) — 2-layer ping-pong ============ */
@@ -2070,6 +2239,8 @@ function applyLang(){
   document.getElementById('t-wind').textContent = L.wind;
   document.getElementById('t-rh').textContent = L.rh;
   document.getElementById('t-pr').textContent = L.pr;
+  document.getElementById('t-mslp').textContent = T('海平面气压','sea-level','aras laut');
+  document.getElementById('isoBtn').title = T('等压线','Isobars','Isobar');
   document.getElementById('t-tl').textContent = L.tl;
   document.getElementById('t-exp-h').textContent = L.expH;
   document.getElementById('exp1').innerHTML = L.exp1;
@@ -2355,6 +2526,7 @@ function setupSpark(){
 document.documentElement.lang = LANGS[lang];
 applyLang();
 initMap();
+document.getElementById('isoBtn').classList.toggle('on', isoOn);
 syncFields();
 setupSpark();
 // Pause the IR loop while the app is backgrounded (battery/data); resume on return.

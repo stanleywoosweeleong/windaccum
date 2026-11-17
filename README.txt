@@ -38,8 +38,8 @@ WHAT CHANGED (review fixes: clock, ensemble, offline)
      asked for stays saved and is retried on the next launch.
   The cache key changed wa_cache -> wa_cache2; the first open refetches.
   The other -91 items (3, 5, 6, 7) followed straight after and are in too - see -91.
-  STILL NOT IN THE CODE, although described further down: the whole of -90
-  (isobars). That section is marked below.
+  The isobar layer (-90) followed after that, so everything described below is now
+  in the code.
 
 WHAT CHANGED (Bahasa Melayu)
   The app now speaks three languages: 中文, English and Bahasa Melayu. The first-launch
@@ -126,23 +126,32 @@ WHAT CHANGED IN -91 (bug fixes found auditing the pre-isobar code)
      change on a second round-trip for an optional layer. It now loads after the
      first paint and re-renders when it lands.
 
-WHAT CHANGED IN -90  [NOT in this index.html: there is no isobar layer in the code]
-  Isobars, ported from 风眼 TyphoonWatch. New 〰 button next to the IR / 地点 buttons.
+WHAT CHANGED IN -90  [implemented; written fresh for this app, not ported]
+  Isobars. New 〰 button next to the IR / 地点 buttons.
   - Marching squares over the ECMWF mean-sea-level pressure field. Draws the field
     and nothing else: no low is named, no circulation classified, no centre marked.
   - Uses its OWN grid: 13x13 at 0.5deg = a 6deg (~660 km) box, NOT the 1.6deg
     convergence grid. Across 180 km the tropical MSLP field varies by well under
     1 hPa, so contouring the convergence grid would draw nothing on most days.
-  - Contour interval anchors on 1 hPa (TyphoonWatch's choice) and moves only when
+  - Contour interval anchors on 1 hPa and moves only when
     forced: finer (0.5 / 0.25) on a slack field, coarser (2 / 4 / 5 / 10) if the
     range would produce more than 14 lines. The chosen interval is always printed
     in the legend.
   - Costs no extra API traffic unless the layer is switched on.
-  - Also adds sea-level pressure + the model's own 24h tendency to the readout row.
+  - Also adds sea-level pressure + the model's own 24h tendency to the readout row
+    (pressure now minus the model's value 24 h earlier; the main request asks for
+    one past day to have it). This part rides on the main request, always.
+  - The grid is snapped to the model's 0.25deg pressure grid, the hour is matched to
+    the forecast by timestamp, and switching the layer on opens the map out to the
+    6deg box (off returns to the convergence grid). Lines are corner-smoothed for
+    display. If the pressure request fails the legend says so and the forecast is
+    unaffected; pressing 〰 again retries.
   - Cache key changed wa_cache -> wa_cache2 (old caches lack the timezone offset
     the two time axes are matched on). First open after updating refetches.
 
 NOTES
   - Data: ECMWF IFS via Open-Meteo (winds 0.25deg; CAPE/rain 9km HRES). Indicative.
   - Leaflet loads from unpkg CDN on first load (cached after by the service worker).
+  - Isobars use pressure_msl from the same ECMWF endpoint, sampled with
+    cell_selection=nearest so sea grid-cells are not snapped to land.
   - Storm/rain/wind thresholds are provisional — calibrate against field observations.
