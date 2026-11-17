@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
 <meta name="theme-color" content="#0d1b2a">
 <script>
 /* Theme before first paint: the saved choice ('light' | 'dark'), else the system setting. */
@@ -43,6 +43,7 @@
   --t-amber:#ffcf7a; --t-red:#fca5a5; --t-cyan:#a9e6f5; --t-blue:#dbeafe; --t-brown:#fde9c8;
   --swb:rgba(255,255,255,.35); --touch:rgba(255,255,255,.05);
   --arrow:#dbe3ec; --arrowsh:rgba(0,0,0,.6); --iso:#f1f5f9; --halo:#0a1521;
+  --convline:#ffd27a; --convcase:#0b1a30; --seed:#ffd94d; --favm:#ffb51a; --markhalo:#000;
 }
 /* Light theme. data-theme is set on <html> before first paint (see the script in <head>). */
 :root[data-theme="light"]{
@@ -55,7 +56,8 @@
   --cvg1-t:#a16207; --cvg2-t:#c2410c; --cvg3-t:#b91c1c; --div-t:#0369a1; --on-muted:#ffffff;
   --t-amber:#92400e; --t-red:#b91c1c; --t-cyan:#0e7490; --t-blue:#1d4ed8; --t-brown:#7c4a1e;
   --swb:rgba(15,27,42,.28); --touch:rgba(15,27,42,.05);
-  --arrow:#1f2d3d; --arrowsh:rgba(255,255,255,.75); --iso:#16212e; --halo:#ffffff;
+  --arrow:#0b1622; --arrowsh:#ffffff; --iso:#0b1622; --halo:#ffffff;
+  --convline:#b45309; --convcase:#ffffff; --seed:#b45309; --favm:#c2410c; --markhalo:#fff;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
@@ -63,7 +65,12 @@ body{
   background:var(--base); color:var(--ink); font-family:var(--sans);
   font-size:15px; line-height:1.5; overflow-x:hidden;
 }
-.wrap{max-width:820px;margin:0 auto;padding:14px 14px 24px}
+.wrap{max-width:820px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top,0px)) 14px 24px}
+/* Installed on iPhone the status bar is drawn in WHITE over the page (black-translucent), so
+   the strip behind it is always dark — in light mode too — to keep the clock and icons readable.
+   In a browser tab the inset is 0 and this is nothing. */
+body::before{content:"";position:fixed;top:0;left:0;right:0;height:env(safe-area-inset-top,0px);
+  background:#0d1b2a;z-index:10001;pointer-events:none}
 
 /* Header */
 header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
@@ -104,7 +111,7 @@ select,.btn{background:var(--panel);border:1px solid var(--line);color:var(--ink
 .leaflet-container{background:var(--well);font-family:var(--sans)}
 .arrow{transition:transform .15s}
 .arrow{color:var(--arrow)}
-.arrow svg{display:block;filter:drop-shadow(0 1px 1px var(--arrowsh))}
+.arrow svg{display:block;filter:drop-shadow(0 0 1px var(--arrowsh)) drop-shadow(0 0 1.5px var(--arrowsh))}
 .focuspin{background:transparent!important;border:none!important;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6))}
 
 /* Readout card */
@@ -189,15 +196,15 @@ input[type=range]{width:100%;margin:8px 0 2px;accent-color:var(--accent)}
 .irrow{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
 .irbtn{font-size:12.5px;padding:7px 12px}
 .irbtn.on{background:var(--accent);color:#231400;border-color:var(--accent)}
-.isolab{font:700 10.5px/1 var(--mono);color:var(--iso);white-space:nowrap;text-align:center;
+.isolab{font:800 11.5px/1 var(--mono);color:var(--iso);white-space:nowrap;text-align:center;
   text-shadow:0 0 3px var(--halo),0 0 3px var(--halo),0 0 5px var(--halo)}
 .irtime{font-size:12px;color:var(--muted);font-family:var(--mono)}
 .irtime.irresume{color:var(--accent-t);cursor:pointer;font-weight:700}
 .iropacity{flex:1;min-width:110px;accent-color:var(--accent)}
 .seedmark,.favmark{display:flex!important;align-items:center;justify-content:center;line-height:1;
   background:transparent!important;border:none!important;box-shadow:none!important;cursor:pointer}
-.seedmark{color:#ffd94d;font-size:12px;text-shadow:0 0 2px #000,0 0 1px #000}
-.favmark{color:#ffb51a;font-size:20px;font-weight:900;text-shadow:0 0 4px #000,0 0 8px rgba(255,180,0,.55),0 1px 2px #000}
+.seedmark{color:var(--seed);font-size:12px;text-shadow:0 0 2px var(--markhalo),0 0 1px var(--markhalo),0 0 2px var(--markhalo)}
+.favmark{color:var(--favm);font-size:20px;font-weight:900;text-shadow:0 0 4px var(--markhalo),0 0 8px rgba(255,180,0,.55),0 1px 2px var(--markhalo)}
 .locsheet{position:fixed;inset:0;z-index:1200;background:rgba(6,12,22,.55);display:none;align-items:flex-end;justify-content:center}
 .locsheet.on{display:flex}
 .locsheet-inner{background:var(--panel);width:100%;max-width:560px;border-radius:20px 20px 0 0;max-height:82vh;
@@ -1559,10 +1566,10 @@ function drawConvergenceAxis(C, gAt){
       const a=gAt(i,j), b=gAt(i+di,j+dj); if(a&&b) segs.push([[a.lat,a.lon],[b.lat,b.lon]]); }});
   });
   // dark casing then bright line, so the axis reads on any background
-  segs.forEach(s=>L.polyline(s,{color:'#0b1a30',weight:5,opacity:0.5,lineCap:'round',interactive:false}).addTo(cellLayer));
-  segs.forEach(s=>L.polyline(s,{color:'#ffd27a',weight:2.6,opacity:0.98,lineCap:'round',interactive:false}).addTo(cellLayer));
+  segs.forEach(s=>L.polyline(s,{color:cssVar('--convcase'),weight:currentTheme()==='light'?6:5,opacity:currentTheme()==='light'?0.9:0.5,lineCap:'round',interactive:false}).addTo(cellLayer));
+  segs.forEach(s=>L.polyline(s,{color:cssVar('--convline'),weight:currentTheme()==='light'?3:2.6,opacity:0.98,lineCap:'round',interactive:false}).addTo(cellLayer));
   keys.forEach(k=>{ const [i,j]=k.split('_').map(Number); const g=gAt(i,j);
-    L.circleMarker([g.lat,g.lon],{radius:2.8,weight:1,color:'#0b1a30',fillColor:'#ffd27a',fillOpacity:1,interactive:false}).addTo(cellLayer); });
+    L.circleMarker([g.lat,g.lon],{radius:2.8,weight:1,color:cssVar('--convcase'),fillColor:cssVar('--convline'),fillOpacity:1,interactive:false}).addTo(cellLayer); });
 }
 
 // parse 'rgb(r,g,b)' or '#rrggbb' to [r,g,b]
@@ -1600,7 +1607,7 @@ function drawArrows(hr){
     const rot=(dir+180)%360;
     const html=`<div class="arrow" style="transform:rotate(${rot}deg)">
       <svg width="22" height="${len+8}" viewBox="0 0 22 ${len+8}">
-        <line x1="11" y1="${len+6}" x2="11" y2="6" stroke="currentColor" stroke-width="2"/>
+        <line x1="11" y1="${len+6}" x2="11" y2="6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
         <path d="M11 2 L6 11 L11 8 L16 11 Z" fill="currentColor"/>
       </svg></div>`;
     L.marker([g.lat,g.lon],{icon:L.divIcon({className:'',html,iconSize:[22,len+8],iconAnchor:[11,(len+8)/2]}),interactive:false})
@@ -1854,7 +1861,7 @@ function drawOverlayLegend(){
       `<span class="grp"><span class="sw" style="background:#fb923c"></span>${V.watch}</span>`+
       `<span class="grp"><span class="sw" style="background:#dc2626"></span>${V.likely}</span>`+
       `<span class="grp" style="color:var(--muted)">${T('三要素叠加','ingredients overlap','pertindihan ramuan')}</span>`+
-      `<span class="grp"><span class="sw" style="background:#ffd27a;height:3px;width:20px;border:none"></span>${T('辐合线','conv line','garis penumpuan')}</span>`;
+      `<span class="grp"><span class="sw" style="background:var(--convline);height:3px;width:20px;border:none"></span>${T('辐合线','conv line','garis penumpuan')}</span>`;
     return;
   }
   if(overlayMode==='cape'){
@@ -1881,7 +1888,7 @@ function drawOverlayLegend(){
     `<span class="grp"><span class="sw" style="background:#fb923c"></span>${L.cats.mod}</span>`+
     `<span class="grp"><span class="sw" style="background:#dc2626"></span>${L.cats.strong}</span>`+
     `<span class="grp" style="color:var(--muted)">↑ = ${T('风向','wind','angin')}</span>`+
-    `<span class="grp"><span class="sw" style="background:#ffd27a;height:3px;width:20px;border:none"></span>${T('辐合线','conv line','garis penumpuan')}</span>`;
+    `<span class="grp"><span class="sw" style="background:var(--convline);height:3px;width:20px;border:none"></span>${T('辐合线','conv line','garis penumpuan')}</span>`;
 }
 function setOverlay(mode){
   overlayMode=mode;
@@ -2074,7 +2081,8 @@ function drawIso(){
     const major = iv>=1 ? level%(iv*5)===0 : Number.isInteger(level);
     let longest=null;
     lines.forEach(ln=>{ const ll=isoSmooth(ln).map(toLL);
-      L.polyline(ll,{pane:'isop',color:cssVar('--iso'),weight:major?2:1.1,opacity:major?.95:.7,interactive:false}).addTo(isoLayer);
+      L.polyline(ll,{pane:'isop',color:cssVar('--halo'),weight:major?5:4,opacity:.55,interactive:false}).addTo(isoLayer);   // casing
+      L.polyline(ll,{pane:'isop',color:cssVar('--iso'),weight:major?2.6:1.6,opacity:major?1:.9,interactive:false}).addTo(isoLayer);
       if(!longest||ll.length>longest.length) longest=ll; });
     if(longest && longest.length>=4){
       const txt = String(level);
