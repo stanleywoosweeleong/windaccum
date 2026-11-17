@@ -198,9 +198,6 @@ input[type=range]{width:100%;margin:8px 0 2px;accent-color:var(--accent)}
 .locdel{flex:0 0 38px;background:var(--panel2);border:1px solid var(--line);color:#f87171;border-radius:9px;font-size:13px;cursor:pointer}
 .locpurge{width:100%;background:rgba(248,113,113,.12);border:1px solid rgba(248,113,113,.4);color:#f87171;border-radius:9px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;margin:4px 0 8px}
 .locempty{color:var(--muted);text-align:center;padding:24px;font-size:13px}
-#wtoast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(12px);background:#0d1a2c;border:1px solid var(--line);color:var(--ink);
-  padding:9px 16px;border-radius:999px;font-size:13px;z-index:1400;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;box-shadow:0 6px 20px rgba(0,0,0,.4)}
-#wtoast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .legend .sw{width:26px;height:14px;border-radius:3px;display:inline-block;border:1px solid rgba(255,255,255,.35);box-shadow:0 1px 2px rgba(0,0,0,.4)}
 .legend .grp{display:flex;align-items:center;gap:5px;margin-right:12px}
 
@@ -652,7 +649,7 @@ const I18N = {
     bands:{ weak:"弱", mod:"中", strong:"强", dry:"发散", sink:"下沉" },
     depth:{ deep:"深层辐合", shallow:"浅层" },
     surge:"季风涌", upslope:"迎风坡抬升",
-    conf:{ overall:"环境信心", members:"成员支持", lift:"抬升", moist:"水汽", inst:"不稳定",
+    conf:{ rh925:"水汽取 925 hPa 相对湿度（与上方判定同一层）。", rh2m:"925 hPa 湿度暂不可用，改用 2 米相对湿度（偏乐观）。", overall:"环境信心", members:"成员支持", lift:"抬升", moist:"水汽", inst:"不稳定",
       note:"ECMWF 集合最多 51 成员 (0.25°) 对水汽＋不稳定环境的一致度 · 高＝各成员大多认同大气已就绪。触发（抬升）见上方确定性预报。仅供参考。" },
     appr:{ title:"降雨来临", here:"模式预报你现在的位置会下雨", reaching:"预计降雨到达 约", onoff:"模式：间歇阵雨至 约", cont:"模式：持续雨至 约", hAbbr:"小时后",
       nearest:"最近降雨", approach:"正在靠近 ↓", recede:"正在远离 ↑", steady:"距离稳定",
@@ -705,7 +702,7 @@ const I18N = {
     bands:{ weak:"weak", mod:"mod", strong:"strong", dry:"drying", sink:"sinking" },
     depth:{ deep:"deep convergence", shallow:"shallow" },
     surge:"Monsoon surge", upslope:"Upslope lift",
-    conf:{ overall:"Environment confidence", members:"members favour", lift:"Lift", moist:"Moisture", inst:"Instability",
+    conf:{ rh925:"Moisture is 925 hPa humidity, the same level as the verdict above.", rh2m:"925 hPa humidity was unavailable, so this uses 2 m humidity, which reads optimistic.", overall:"Environment confidence", members:"members favour", lift:"Lift", moist:"Moisture", inst:"Instability",
       note:"Agreement across ECMWF ensemble (up to 51 members, 0.25°) on a moist + unstable environment · high = members mostly concur the atmosphere is primed. The trigger (lift) is the deterministic forecast above. Indicative." },
     appr:{ title:"Rain approach", here:"Model expects rain at your location", reaching:"Rain reaching you ~", onoff:"Model: on/off showers till ~", cont:"Model: steady rain till ~", hAbbr:"h",
       nearest:"Nearest rain", approach:"approaching ↓", recede:"moving away ↑", steady:"holding distance",
@@ -758,7 +755,7 @@ const I18N = {
     bands:{ weak:"lemah", mod:"sederhana", strong:"kuat", dry:"kering", sink:"menurun" },
     depth:{ deep:"penumpuan dalam", shallow:"cetek" },
     surge:"Luruan monsun", upslope:"Angkatan cerun",
-    conf:{ overall:"Keyakinan persekitaran", members:"ahli menyokong", lift:"Angkatan", moist:"Kelembapan", inst:"Ketidakstabilan",
+    conf:{ rh925:"Kelembapan diambil pada 925 hPa, aras yang sama dengan keputusan di atas.", rh2m:"Kelembapan 925 hPa tiada, maka kelembapan 2 m digunakan dan bacaannya cenderung optimistik.", overall:"Keyakinan persekitaran", members:"ahli menyokong", lift:"Angkatan", moist:"Kelembapan", inst:"Ketidakstabilan",
       note:"Persetujuan antara ahli ensembel ECMWF (sehingga 51 ahli, 0.25°) tentang persekitaran lembap + tidak stabil · tinggi = kebanyakan ahli bersetuju atmosfera sudah bersedia. Pencetus (angkatan) ialah ramalan deterministik di atas. Sebagai panduan sahaja." },
     appr:{ title:"Hujan menghampiri", here:"Model menjangka hujan di lokasi anda", reaching:"Hujan dijangka tiba ~", onoff:"Model: hujan sekejap-sekejap hingga ~", cont:"Model: hujan berterusan hingga ~", hAbbr:"j",
       nearest:"Hujan terdekat", approach:"menghampiri ↓", recede:"menjauh ↑", steady:"jarak kekal",
@@ -840,7 +837,6 @@ function saveFavs(){ try{ localStorage.setItem('wa_favs', JSON.stringify(favs));
 function coordKey(lat,lon){ return (+lat).toFixed(3)+','+(+lon).toFixed(3); }
 function recAt(lat,lon){ const k=coordKey(lat,lon); return favs.find(f=>coordKey(f.lat,f.lon)===k); }
 function activeFavAt(lat,lon){ const f=recAt(lat,lon); return (f && !f.deleted && f.fav)?f:null; }
-function toast(msg){ let t=document.getElementById('wtoast'); if(!t){t=document.createElement('div');t.id='wtoast';document.body.appendChild(t);} t.textContent=msg; t.className='show'; clearTimeout(toast._t); toast._t=setTimeout(()=>t.className='',1800); }
 
 let seedLayer=null, showSeeds=(localStorage.getItem('wa_showseeds')!=='0');
 function seedIcon(){ return L.divIcon({className:'seedmark', html:'★', iconSize:[22,22], iconAnchor:[11,11]}); }
@@ -1096,12 +1092,14 @@ async function loadData(){
         pr:win(h.precipitation||[]),
         gust:win(h.wind_gusts_10m||[]) };
     });
-    // Terrain elevation (static, Copernicus DEM 90m via Open-Meteo) — optional enhancement
-    try{
-      const elev = await fetchElevation(lats, lons, ac.signal);
-      if(elev && elev.length===grid.length) grid.forEach((g,k)=>{ g.elev = elev[k]; });
-    }catch(e){ /* terrain optional — weather still works without it */ }
+    // Terrain elevation (static, Copernicus DEM 90m via Open-Meteo) is optional and must not
+    // hold up the forecast: a grid already fetched is applied now, a new one loads after the
+    // first paint (below) and the view is redrawn when it lands.
+    const elevSig = lats.join(',')+'|'+lons.join(',');
+    const elevReady = elevCache.sig===elevSig && elevCache.elev && elevCache.elev.length===grid.length;
+    if(elevReady) grid.forEach((g,k)=>{ g.elev = elevCache.elev[k]; });
     data = { time, grid, hours:time.length };
+    const thisData = data;
     seriesCache=null;
     confShown=false; { const cb=document.getElementById('confBody'); if(cb) cb.innerHTML=''; }
     // snap slider to current hour
@@ -1112,6 +1110,15 @@ async function loadData(){
     render();
     setStatus(false, "");
     loadConfidence();   // background auto-load (cached per location)
+    if(!elevReady){
+      fetchElevation(lats, lons, ac.signal).then(elev=>{
+        if(data!==thisData || !elev || elev.length!==grid.length) return;   // superseded meanwhile
+        grid.forEach((g,k)=>{ g.elev = elev[k]; });
+        seriesCache=null;
+        try{ localStorage.setItem("wa_cache2", JSON.stringify({center, data, at:Date.now()})); }catch(e){}
+        render();
+      }).catch(()=>{ /* terrain optional — weather still works without it */ });
+    }
   }catch(err){
     if(err && err.name==='AbortError') return;   // superseded by a newer request
     // fall back to cache — loud about it, never silent-stale
@@ -2110,20 +2117,30 @@ let ensData=null, ensSig=null, confShown=false;
 async function fetchEnsemble(){
   const sig=center.lat.toFixed(3)+','+center.lon.toFixed(3);
   if(ensSig===sig && ensData) return ensData;
-  const url=`https://ensemble-api.open-meteo.com/v1/ensemble`
-    +`?latitude=${center.lat.toFixed(4)}&longitude=${center.lon.toFixed(4)}`
-    +`&hourly=relative_humidity_2m,cape&models=${ENSEMBLE.model}&forecast_days=3&timezone=${TZ}`;
-  const res=await fetch(url); if(!res.ok) throw new Error("ens HTTP "+res.status);
-  const json=await res.json();
-  const h = Array.isArray(json) ? (json[0]&&json[0].hourly) : json.hourly;
-  if(!h || !h.relative_humidity_2m) throw new Error("ensemble fields unavailable");
-  // Member series are ENUMERATED from the response (control + relative_humidity_2m_memberNN,
-  // zero-padded by the API) — never rebuilt from a counter, which silently skipped members.
-  const RH='relative_humidity_2m';
-  const rhKeys=[RH].concat(Object.keys(h).filter(k=>/^relative_humidity_2m_member\d+$/.test(k)).sort());
+  // Moisture is read at 925 hPa — the same level the deterministic gate uses — so the bar is
+  // comparable with the verdict above. 2 m RH (wetter near the ground, so optimistic) is only
+  // the fallback when the API refuses or returns no 925 hPa series; the note says which was used.
+  const get=async vars=>{
+    const res=await fetch(`https://ensemble-api.open-meteo.com/v1/ensemble`
+      +`?latitude=${center.lat.toFixed(4)}&longitude=${center.lon.toFixed(4)}`
+      +`&hourly=${vars}&models=${ENSEMBLE.model}&forecast_days=3&timezone=${TZ}`);
+    if(!res.ok) throw new Error("ens HTTP "+res.status);
+    const json=await res.json();
+    return Array.isArray(json) ? (json[0]&&json[0].hourly) : json.hourly;
+  };
+  const R925='relative_humidity_925hPa', R2M='relative_humidity_2m';
+  const has=(o,k)=>!!o && Array.isArray(o[k]) && o[k].some(v=>v!=null);
+  let h=null;
+  try{ h=await get(`${R925},${R2M},cape`); }catch(e){ h=null; }
+  if(!has(h,R925) && !has(h,R2M)) h=await get(`${R2M},cape`);
+  const RH = has(h,R925) ? R925 : R2M;
+  if(!has(h,RH)) throw new Error("ensemble fields unavailable");
+  // Member series are ENUMERATED from the response (control + <var>_memberNN, zero-padded by
+  // the API) — never rebuilt from a counter, which silently skipped members.
+  const rhKeys=[RH].concat(Object.keys(h).filter(k=>k.indexOf(RH+'_member')===0 && /^\d+$/.test(k.slice(RH.length+7))).sort());
   const pairs=rhKeys.map(k=>({rh:h[k], cape:h['cape'+k.slice(RH.length)]})).filter(p=>Array.isArray(p.rh)&&Array.isArray(p.cape));
   const at={}; (h.time||[]).forEach((t,i)=>{ at[t]=i; });   // stamp → index on the ENSEMBLE's own time axis
-  ensData={pairs, at}; ensSig=sig;
+  ensData={pairs, at, rhLevel: RH===R925?'925':'2m'}; ensSig=sig;
   return ensData;
 }
 // Member agreement on the storm ENVIRONMENT (moisture + instability) at one forecast stamp.
@@ -2164,7 +2181,7 @@ function renderConfidence(){
     `<div class="confhead" style="color:${col}">${V.overall}: ${c.pctFav}% <span class="cfsub">(${c.favorable}/${c.members} ${V.members})</span></div>`
     + bar(V.moist, c.pctMoist, 'var(--div)')
     + bar(V.inst, c.pctInst, 'var(--cvg3)')
-    + `<div class="cfnote">${V.note}</div>`;
+    + `<div class="cfnote">${V.note} ${ensData.rhLevel==='925'?V.rh925:V.rh2m}</div>`;
 }
 
 /* ================= SHARE ================= */
@@ -2350,6 +2367,17 @@ document.addEventListener('visibilitychange', ()=>{
   }
 });
 try{ localStorage.removeItem('wa_cache'); }catch(e){}   // pre-MYT cache: its stamps are not comparable
+// Paint the last forecast at once, so the screen is not empty while the fresh one loads (or
+// fails, offline). Only when it is for the spot being opened and recent enough to still be
+// "now"; anything else waits for loadData, whose failure path shows the cache WITH its banner.
+{ const c=loadCache();
+  if(c && Math.abs(c.center.lat-center.lat)<1e-4 && Math.abs(c.center.lon-center.lon)<1e-4
+       && Date.now()-(c.at||0) < 3*3600*1000 && c.data.time && c.data.grid){
+    data=c.data; seriesCache=null;
+    hourIdx=nearestHourIndex(data.time);
+    const sl=document.getElementById('hourSlider'); sl.max=data.hours-1; sl.value=hourIdx;
+    try{ render(); }catch(e){ data=null; }
+  } }
 loadData();
 // Launch: show the saved spot at once, then move to where the user is. On the very first
 // launch the language comes first, so the location prompt appears in an app they can read.

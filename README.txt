@@ -37,8 +37,9 @@ WHAT CHANGED (review fixes: clock, ensemble, offline)
      place and the banner names that place and how old the cache is. The spot you
      asked for stays saved and is retried on the next launch.
   The cache key changed wa_cache -> wa_cache2; the first open refetches.
-  STILL NOT IN THE CODE, although described further down: -91 items 3, 5, 6, 7 and
-  the whole of -90 (isobars). Those sections are marked below.
+  The other -91 items (3, 5, 6, 7) followed straight after and are in too - see -91.
+  STILL NOT IN THE CODE, although described further down: the whole of -90
+  (isobars). That section is marked below.
 
 WHAT CHANGED (Bahasa Melayu)
   The app now speaks three languages: 中文, English and Bahasa Melayu. The first-launch
@@ -97,7 +98,7 @@ WHAT CHANGED IN -92 (Malaysia Standard Time)  [implemented in the review fixes a
   approximation - the same reasoning TyphoonWatch's myt() helper uses.
 
 WHAT CHANGED IN -91 (bug fixes found auditing the pre-isobar code)
-  [items 1, 2 and 4 are implemented; items 3, 5, 6 and 7 are NOT in this index.html]
+  [all seven items are implemented]
   1. Ensemble confidence read the WRONG HOUR. The panel indexed the ensemble arrays
      with the main grid's hour, but the main series is a 48-slot window opening ~2 h
      before now while the ensemble series always starts 00:00 today. At 3pm it was
@@ -115,7 +116,10 @@ WHAT CHANGED IN -91 (bug fixes found auditing the pre-isobar code)
      while pin and lat/lon fields still showed the requested one. The whole view now
      moves to the cached place and the banner names it AND the cache age.
   5. The boot line `const cached=loadCache()` was assigned and never used - the
-     promised instant-offline paint now actually happens.
+     promised instant-offline paint now actually happens: the last forecast is
+     painted at launch when it is for the same spot and under 3 hours old. An older
+     cache, or one for another place, is only shown by the offline path, with its
+     banner.
   6. function toast() was declared twice; the later one hoisted over the first, so
      #wtoast was never created and its CSS was dead. One implementation now.
   7. Terrain elevation was awaited BEFORE the first render, blocking every location
