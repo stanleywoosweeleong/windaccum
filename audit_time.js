@@ -1,7 +1,7 @@
 /* Runs the real clock helpers against a device deliberately set to the WRONG zone,
    which is the only way to prove the rendering no longer depends on it. */
 const fs=require('fs'), vm=require('vm');
-const html=fs.readFileSync('windaccum-main/index.html','utf8');
+const html=fs.readFileSync(require('path').join(__dirname,'index.html'),'utf8');
 const js=html.match(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/)[1];
 let fail=0; const ok=(c,m)=>{ console.log((c?'  ok  ':'FAIL  ')+m); if(!c) fail++; };
 

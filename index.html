@@ -492,6 +492,20 @@ const HIMAWARI = {
 const TRANSPARENT_PX='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 // IR saturation keying: grey (low-sat, clear/warm) → transparent; coloured cold tops kept
 const IR_SATMIN=0.10, IR_SATFULL=0.45;
+/* ---- One clock: Malaysia Standard Time (UTC+8, no daylight saving) ----
+   Every forecast request asks for TZ, so the API returns naive stamps like "2026-08-07T15:00"
+   that are MYT wall-clock. They are NEVER handed to new Date(stamp), which would read them in
+   the DEVICE zone. Instead "Z" is appended and the getUTC* fields are read, so rendering does
+   not depend on the device clock, and mytMs() gives the true instant for comparing with now. */
+const TZ='Asia/Kuala_Lumpur', TZ_OFF_MS=8*3600*1000;
+const p2=x=>String(x).padStart(2,'0');
+const mytMs=s=>Date.parse(s+'Z')-TZ_OFF_MS;                    // naive MYT stamp → true instant (ms)
+const mytHour=s=>new Date(Date.parse(s+'Z')).getUTCHours();    // 0–23, Malaysian
+const mytHH=s=>p2(mytHour(s))+':00';
+const mytDay=s=>s.slice(0,10);                                 // Malaysian calendar date YYYY-MM-DD
+const mytDow=s=>new Date(Date.parse(s+'Z')).getUTCDay();
+const mytClock=ms=>{ const d=new Date(ms+TZ_OFF_MS); return p2(d.getUTCHours())+':'+p2(d.getUTCMinutes()); };
+const mytToday=()=>new Date(Date.now()+TZ_OFF_MS).toISOString().slice(0,10);
 // ECMWF ensemble (ENS, 51 members, 0.25°) for forecast confidence — on-demand, pure ECMWF
 const ENSEMBLE = { model:'ecmwf_ifs025_ensemble', spacing:0.20 };
 // Rain-approach tracker: model precipitation threshold (mm/h) and look-ahead for the trend
@@ -627,7 +641,8 @@ const I18N = {
     title:"风的累积", sub:"WIND ACCUMULATION · CONVERGENCE MONITOR",
     tag:"925 hPa 边界层风辐合 · MFC · ECMWF IFS 0.25°",
     geo:"当前位置", go:"查看", phLat:"纬度 3.155", phLon:"经度 102.400", refresh:"更新", wind:"925 风", rh:"MFC g/kg·h", pr:"上升* cm/s",
-    tl:"48h 辐合 · 点击或拖动", share:"分享到 WhatsApp",
+    tl:"48h 辐合（马时）· 点击或拖动", myt:"马时", tzNote:"所有时间均为马来西亚时间（马时，UTC+8），与手机时区及所选地点无关。",
+    cacheAt:"缓存位置", ensNoHour:"集合预报未涵盖此时段", share:"分享到 WhatsApp",
     shareTitle:"分享到 WhatsApp", shareNote:"可编辑后发送 · 供每日晨间广播使用", send:"发送", cancel:"取消",
     expH:"什么是风的累积？",
     langNext:"EN",
@@ -679,7 +694,8 @@ const I18N = {
     title:"Wind Accumulation", sub:"低层风辐合监测 · CONVERGENCE MONITOR",
     tag:"925 hPa boundary-layer convergence · MFC · ECMWF IFS 0.25°",
     geo:"Current location", go:"Go", phLat:"Latitude 3.155", phLon:"Longitude 102.400", refresh:"Refresh", wind:"925 wind", rh:"MFC g/kg·h", pr:"ascent* cm/s",
-    tl:"48h outlook · tap or drag", share:"Share to WhatsApp",
+    tl:"48h outlook (MYT) · tap or drag", myt:"MYT", tzNote:"All times are Malaysia Time (MYT, UTC+8), whatever your phone's time zone or the place you picked.",
+    cacheAt:"cached for", ensNoHour:"The ensemble does not cover this hour", share:"Share to WhatsApp",
     shareTitle:"Share to WhatsApp", shareNote:"Edit, then send · for your daily morning broadcast", send:"Send", cancel:"Cancel",
     expH:"What is wind accumulation?",
     langNext:"中",
@@ -731,7 +747,8 @@ const I18N = {
     title:"Penumpuan Angin", sub:"PEMANTAU PENUMPUAN ANGIN · CONVERGENCE MONITOR",
     tag:"Penumpuan lapisan sempadan 925 hPa · MFC · ECMWF IFS 0.25°",
     geo:"Lokasi semasa", go:"Lihat", phLat:"Latitud 3.155", phLon:"Longitud 102.400", refresh:"Kemas kini", wind:"Angin 925", rh:"MFC g/kg·j", pr:"naik* cm/s",
-    tl:"Tinjauan 48j · ketik atau seret", share:"Kongsi ke WhatsApp",
+    tl:"Tinjauan 48j (MYT) · ketik atau seret", myt:"MYT", tzNote:"Semua masa ialah Waktu Malaysia (MYT, UTC+8), tanpa mengira zon waktu telefon atau tempat yang dipilih.",
+    cacheAt:"data untuk", ensNoHour:"Ensembel tidak meliputi jam ini", share:"Kongsi ke WhatsApp",
     shareTitle:"Kongsi ke WhatsApp", shareNote:"Sunting, kemudian hantar · untuk siaran pagi harian anda", send:"Hantar", cancel:"Batal",
     expH:"Apakah itu penumpuan angin?",
     langNext:"中",
@@ -780,7 +797,8 @@ const I18N = {
     }
   }
 };
-const LANGS = { zh:"zh", en:"en", ms:"ms" };   // code → <html lang>; also the 🌐 cycle order
+// code → <html lang>; also the 🌐 cycle order
+const LANGS = { zh:"zh", en:"en", ms:"ms" };
 let lang = (()=>{ try{ return localStorage.getItem("wa_lang"); }catch(e){ return null; } })();
 const FIRST_LAUNCH = !LANGS[lang];             // nothing valid saved → ask first
 if(FIRST_LAUNCH) lang = "zh";                  // what renders behind the picker
@@ -1051,9 +1069,9 @@ async function loadData(){
     + `temperature_925hPa,relative_humidity_925hPa,cape,precipitation,wind_gusts_10m`;
   const url = CAPE_HIRES
     ? `https://api.open-meteo.com/v1/ecmwf?latitude=${lats.join(',')}&longitude=${lons.join(',')}`
-      + `&hourly=${vars}&wind_speed_unit=ms&timezone=auto`
+      + `&hourly=${vars}&wind_speed_unit=ms&timezone=${TZ}`
     : `https://api.open-meteo.com/v1/forecast?latitude=${lats.join(',')}&longitude=${lons.join(',')}`
-      + `&hourly=${vars}&models=ecmwf_ifs025&forecast_days=3&wind_speed_unit=ms&timezone=auto`;
+      + `&hourly=${vars}&models=ecmwf_ifs025&forecast_days=3&wind_speed_unit=ms&timezone=${TZ}`;
   try{
     const res = await fetch(url, {signal:ac.signal});
     if(!res.ok) throw new Error("HTTP "+res.status);
@@ -1063,7 +1081,7 @@ async function loadData(){
     const full = arr[0].hourly.time;
     const target = Date.now() - 2*3600*1000;
     let startIdx=0, bd=1e18;
-    full.forEach((t,i)=>{ const d=Math.abs(new Date(t).getTime()-target); if(d<bd){bd=d;startIdx=i;} });
+    full.forEach((t,i)=>{ const d=Math.abs(mytMs(t)-target); if(d<bd){bd=d;startIdx=i;} });
     startIdx = Math.max(0, Math.min(startIdx, full.length - FORECAST_HOURS));
     const win = a => a ? a.slice(startIdx, startIdx+FORECAST_HOURS) : a;
     const time = win(full);
@@ -1090,7 +1108,7 @@ async function loadData(){
     hourIdx = nearestHourIndex(time);
     document.getElementById('hourSlider').max = time.length-1;
     document.getElementById('hourSlider').value = hourIdx;
-    try{ localStorage.setItem("wa_cache", JSON.stringify({center, data, at:Date.now()})); }catch(e){}
+    try{ localStorage.setItem("wa_cache2", JSON.stringify({center, data, at:Date.now()})); }catch(e){}
     render();
     setStatus(false, "");
     loadConfidence();   // background auto-load (cached per location)
@@ -1098,8 +1116,7 @@ async function loadData(){
     if(err && err.name==='AbortError') return;   // superseded by a newer request
     // fall back to cache — loud about it, never silent-stale
     const c = loadCache();
-    if(c){ center=c.center; data=c.data; hourIdx=Math.min(hourIdx,data.hours-1);
-      render(); setStatus(false, "⚠ "+I18N[lang].offline); }
+    if(c) showCached(c);
     else setStatus(false, "⚠ "+I18N[lang].failed);
   }finally{
     if(inflight===ac) inflight=null;
@@ -1107,13 +1124,38 @@ async function loadData(){
   }
 }
 
+// wa_cache2: stamps are naive MYT. (The old wa_cache held location-local stamps; dropped at boot.)
 function loadCache(){
-  try{ const c=JSON.parse(localStorage.getItem("wa_cache")); return c&&c.data?c:null; }catch(e){ return null; }
+  try{ const c=JSON.parse(localStorage.getItem("wa_cache2")); return c&&c.data&&c.center?c:null; }catch(e){ return null; }
+}
+function agoText(ms){
+  const m=Math.max(0,Math.round(ms/60000));
+  if(m<60) return T(`${m} 分钟前`,`${m} min ago`,`${m} min lalu`);
+  const h=Math.round(m/60);
+  if(h<48) return T(`${h} 小时前`,`${h} h ago`,`${h} jam lalu`);
+  const d=Math.round(h/24);
+  return T(`${d} 天前`,`${d} days ago`,`${d} hari lalu`);
+}
+// The fetch failed, so the cached forecast is shown — and the WHOLE view moves to the place it
+// was made for (pin, lat/lon fields, map), with a banner naming that place and the cache age.
+// Nothing is saved: the spot the user asked for stays in storage and is retried next launch.
+function showCached(c){
+  center = { lat:c.center.lat, lon:c.center.lon, name:c.center.name||null };
+  data = c.data; seriesCache=null;
+  ensData=null; ensSig=null; confShown=false;
+  { const cb=document.getElementById('confBody'); if(cb) cb.innerHTML=''; }
+  if(centerPin) centerPin.setLatLng([center.lat,center.lon]);
+  syncFields(); fitGrid(); updateFocusFav();
+  hourIdx = nearestHourIndex(data.time);
+  const sl=document.getElementById('hourSlider'); sl.max=data.hours-1; sl.value=hourIdx;
+  render();
+  const where = center.name ? (center.name[lang]||center.name.en) : `${center.lat.toFixed(3)}, ${center.lon.toFixed(3)}`;
+  setStatus(false, "⚠ "+I18N[lang].offline+" · "+I18N[lang].cacheAt+" "+where+" · "+agoText(Date.now()-(c.at||0)));
 }
 function nearestHourIndex(times){
   const now=Date.now();
   let best=0,bd=1e18;
-  times.forEach((t,i)=>{ const d=Math.abs(new Date(t).getTime()-now); if(d<bd){bd=d;best=i;} });
+  times.forEach((t,i)=>{ const d=Math.abs(mytMs(t)-now); if(d<bd){bd=d;best=i;} });
   return best;
 }
 
@@ -1510,7 +1552,7 @@ function drawReadout(C, hr){
   const rPr=document.getElementById('r-pr');
   rPr.textContent=(ingM.ascent>0?'+':'')+ingM.ascent.toFixed(0); rPr.style.color=acat.col;
   const rPrCat=document.getElementById('r-pr-cat'); rPrCat.textContent=acat.label; rPrCat.style.color=acat.col;
-  const t=new Date(data.time[hr]);
+  const t=data.time[hr];
   baseTimeLabel = fmtTime(t);
   document.getElementById('r-loc').textContent =
     (center.name?(center.name[lang]||center.name.en):`${center.lat.toFixed(3)}, ${center.lon.toFixed(3)}`)
@@ -1617,7 +1659,7 @@ function drawApproach(){
   const nowIdx=nearestHourIndex(data.time);        // always "from now", independent of the slider
   const A=computeApproach(nowIdx), L=I18N[lang].appr;
   if(!A){ el.innerHTML=''; return; }
-  const fmt=idx=>String(new Date(data.time[idx]).getHours()).padStart(2,'0')+':00';
+  const fmt=idx=>mytHH(data.time[idx]);
   const easing=()=>{ if(A.endsAt==null) return ''; const inN=A.endsAt-nowIdx;
     const lab = A.intermittent ? L.onoff : L.cont;
     return `<div class="apsub2">${lab} <b>${fmt(A.endsAt)}</b>${inN>0?` (${inN}${L.hAbbr})`:''}</div>`; };
@@ -1846,7 +1888,7 @@ function irTimestamps(){
 }
 function irUpdateTime(){
   const d=irFrames[irIdx]; if(!d) return;
-  const hhmm=d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  const hhmm=mytClock(d.getTime())+' '+I18N[lang].myt;
   document.getElementById('irTime').textContent = '🛰 '+hhmm+(T(' 红外',' IR',' IR'));
 }
 // only two panes ever — no stacked-layer texture eviction on iOS
@@ -1938,7 +1980,7 @@ function irGoto(k){
     map.getPane('irp'+hiddenName).style.opacity=irOpacity;
     map.getPane('irp'+irVis).style.opacity=0;
     irVis=hiddenName; irIdx=k;
-    const d=irFrames[irIdx], hhmm=d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const d=irFrames[irIdx], hhmm=mytClock(d.getTime())+' '+I18N[lang].myt;
     const el2=document.getElementById('irTime'); if(el2) el2.textContent='🛰 '+hhmm+(T(' 红外·点击播放',' IR · tap to play',' IR · ketik untuk main'));
   };
   hidden.off('load'); hidden.once('load', done);
@@ -1953,7 +1995,7 @@ function irFrameForTime(ms){
 // when scrubbing the outlook into IR's ~2h past window, nudge IR to the matching frame
 function syncIRToHour(){
   if(!irOn || !irFrames.length || !data) return;
-  const t=new Date(data.time[hourIdx]).getTime();
+  const t=mytMs(data.time[hourIdx]);
   const k=irFrameForTime(t);
   if(k>=0 && k!==irIdx) irGoto(k);
 }
@@ -2026,7 +2068,7 @@ function applyLang(){
   document.getElementById('exp1').innerHTML = L.exp1;
   document.getElementById('exp2').innerHTML = L.exp2;
   document.getElementById('exp3').innerHTML = L.exp3;
-  document.getElementById('exp-warn').innerHTML = L.warn;
+  document.getElementById('exp-warn').innerHTML = L.warn + '<br>🕒 ' + L.tzNote;
   document.getElementById('t-qr').textContent = T('扫码打开／分享此工具','Scan to open / share this tool','Imbas untuk buka / kongsi alat ini');
   document.getElementById('credit').innerHTML =
     (T('数据 ','Data: ','Data: '))
@@ -2070,23 +2112,31 @@ async function fetchEnsemble(){
   if(ensSig===sig && ensData) return ensData;
   const url=`https://ensemble-api.open-meteo.com/v1/ensemble`
     +`?latitude=${center.lat.toFixed(4)}&longitude=${center.lon.toFixed(4)}`
-    +`&hourly=relative_humidity_2m,cape&models=${ENSEMBLE.model}&forecast_days=3&timezone=auto`;
+    +`&hourly=relative_humidity_2m,cape&models=${ENSEMBLE.model}&forecast_days=3&timezone=${TZ}`;
   const res=await fetch(url); if(!res.ok) throw new Error("ens HTTP "+res.status);
   const json=await res.json();
   const h = Array.isArray(json) ? (json[0]&&json[0].hourly) : json.hourly;
   if(!h || !h.relative_humidity_2m) throw new Error("ensemble fields unavailable");
-  const M=1+Object.keys(h).filter(k=>/^relative_humidity_2m_member\d+$/.test(k)).length;
-  ensData={hourly:h, members:M, time:h.time}; ensSig=sig;
+  // Member series are ENUMERATED from the response (control + relative_humidity_2m_memberNN,
+  // zero-padded by the API) — never rebuilt from a counter, which silently skipped members.
+  const RH='relative_humidity_2m';
+  const rhKeys=[RH].concat(Object.keys(h).filter(k=>/^relative_humidity_2m_member\d+$/.test(k)).sort());
+  const pairs=rhKeys.map(k=>({rh:h[k], cape:h['cape'+k.slice(RH.length)]})).filter(p=>Array.isArray(p.rh)&&Array.isArray(p.cape));
+  const at={}; (h.time||[]).forEach((t,i)=>{ at[t]=i; });   // stamp → index on the ENSEMBLE's own time axis
+  ensData={pairs, at}; ensSig=sig;
   return ensData;
 }
-// member agreement on the storm ENVIRONMENT (moisture + instability) at hour hr
-function computeConfidence(hr){
+// Member agreement on the storm ENVIRONMENT (moisture + instability) at one forecast stamp.
+// The main series is a moving 48 h window while the ensemble starts at 00:00, so the two are
+// matched on the timestamp (both requested in TZ), never on array position.
+// Returns null when no member has data, {noHour:true} when the ensemble does not reach that hour.
+function computeConfidence(stamp){
   if(!ensData) return null;
-  const h=ensData.hourly, M=ensData.members;
-  const mv=(base,m)=>{ const k=m===0?base:base+'_member'+m; const a=h[k]; return (a&&a[hr]!=null)?a[hr]:null; };
+  const hr=ensData.at[stamp];
+  if(hr===undefined) return {noHour:true};
   let valid=0, fav=0, moistY=0, instY=0;
-  for(let m=0;m<M;m++){
-    const rh=mv('relative_humidity_2m',m), cape=mv('cape',m);
+  for(const m of ensData.pairs){
+    const rh=m.rh[hr], cape=m.cape[hr];
     if(rh==null||cape==null) continue;
     valid++;
     const moist=rh>=ING.rhOn, inst=cape>=ING.capeOn;
@@ -2105,7 +2155,8 @@ function loadConfidence(){
 }
 function renderConfidence(){
   if(!confShown || !ensData) return;
-  const c=computeConfidence(hourIdx), body=document.getElementById('confBody'), V=I18N[lang].conf;
+  const c=computeConfidence(data.time[hourIdx]), body=document.getElementById('confBody'), V=I18N[lang].conf;
+  if(c && c.noHour){ body.innerHTML='<span style="color:var(--muted)">'+I18N[lang].ensNoHour+'</span>'; return; }
   if(!c){ body.innerHTML='<span style="color:var(--muted)">'+(T('无有效成员','no valid members','tiada ahli yang sah'))+'</span>'; return; }
   const col=c.pctFav>=66?'var(--bad)':c.pctFav>=33?'var(--warn)':'var(--muted)';
   const bar=(lab,pct,bc)=>`<div class="confrow"><span class="cflab">${lab}</span><span class="cfbarwrap"><span class="cfbar" style="width:${pct}%;background:${bc}"></span></span><b class="cfpct">${pct}%</b></div>`;
@@ -2139,11 +2190,12 @@ function verdictText(ing){
 // short phrase for today's daytime (06–21) storm window
 function todayWindow(){
   const M=I18N[lang].morn;
-  const now=new Date(),ty=now.getFullYear(),tm=now.getMonth(),td=now.getDate();
+  const today=mytToday();          // the Malaysian day, whatever the device clock says
   const marks=[];
-  data.time.forEach((t,i)=>{ const d=new Date(t);
-    if(d.getFullYear()===ty&&d.getMonth()===tm&&d.getDate()===td&&d.getHours()>=6&&d.getHours()<=21){
-      const ing=stormIngredients(i); marks.push({h:d.getHours(), lvl:ing.level}); }
+  data.time.forEach((t,i)=>{
+    if(mytDay(t)!==today) return;
+    const h=mytHour(t);
+    if(h>=6&&h<=21){ const ing=stormIngredients(i); marks.push({h, lvl:ing.level}); }
   });
   if(!marks.length) return M.nodata;
   const storm=marks.filter(m=>m.lvl>=3);
@@ -2163,7 +2215,7 @@ function shareRainText(){
   const nowIdx=nearestHourIndex(data.time);
   const A=computeApproach(nowIdx); if(!A) return '';
   const P=I18N[lang].appr;
-  const fmt=idx=>String(new Date(data.time[idx]).getHours()).padStart(2,'0')+':00';
+  const fmt=idx=>mytHH(data.time[idx]);
   let head='';
   if(A.rainingHere) head=`🌧 ${P.here}`;
   else if(A.eta!=null){ const inN=A.eta-nowIdx; head=`🌧 ${P.reaching}${fmt(A.eta)}${inN>0?` (${inN}${P.hAbbr})`:''}`; }
@@ -2187,7 +2239,7 @@ function buildShareText(){
   const val=(cc>0?'+':'')+(cc*1e5).toFixed(1)+"×10⁻⁵ s⁻¹";
   const capeTxt=ing.capeUnknown?"—":Math.round(ing.cape)+" J/kg";
   const mark=b=>b?"✅":"⬜";
-  const dd=String(new Date().getDate()).padStart(2,'0'), mmn=String(new Date().getMonth()+1).padStart(2,'0');
+  const md=mytToday(), dd=md.slice(8,10), mmn=md.slice(5,7);
   const todayLab=(T('今日','Today','Hari ini'))+` (${dd}/${mmn})`;
   const mfcTxt=(ing.mfc>0?'+':'')+ing.mfc.toFixed(1)+" g/kg·h";
   const ascTxt=(ing.ascent>0?'+':'')+ing.ascent.toFixed(0)+" cm/s";
@@ -2225,11 +2277,11 @@ function sendShare(){
   closeShare();
 }
 
-function fmtTime(t){
+// s is a naive MYT stamp from the forecast ("2026-08-07T15:00"); the result is tagged MYT.
+function fmtTime(s){
   const days=T(['周日','周一','周二','周三','周四','周五','周六'],['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],['Ahd','Isn','Sel','Rab','Kha','Jum','Sab']);
-  const now=new Date(); const sameDay=t.toDateString()===now.toDateString();
-  const hh=String(t.getHours()).padStart(2,'0');
-  return (sameDay?(T('今天','Today','Hari ini')):days[t.getDay()])+" "+hh+":00";
+  const day = mytDay(s)===mytToday() ? T('今天','Today','Hari ini') : days[mytDow(s)];
+  return day+" "+mytHH(s)+" "+I18N[lang].myt;
 }
 function setStatus(spin,msg){
   document.getElementById('status').innerHTML = (spin?'<span class="spin"></span>':'')+(msg||'');
@@ -2297,7 +2349,7 @@ document.addEventListener('visibilitychange', ()=>{
     irBgStopped=false; irPlayStart=Date.now(); irAdvance((irIdx+1)%irFrames.length,false);
   }
 });
-const cached=loadCache(); // show something instantly if offline
+try{ localStorage.removeItem('wa_cache'); }catch(e){}   // pre-MYT cache: its stamps are not comparable
 loadData();
 // Launch: show the saved spot at once, then move to where the user is. On the very first
 // launch the language comes first, so the location prompt appears in an app they can read.

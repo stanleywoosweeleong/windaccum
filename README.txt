@@ -22,6 +22,24 @@ UPDATING
   the new version simply appears on the next launch.
   Check a change before pushing:  node --check sw.js
 
+WHAT CHANGED (review fixes: clock, ensemble, offline)
+  An outside review of main found that four fixes this README described under -91
+  and -92 were NOT in index.html (the README had been uploaded from a newer bundle
+  than the code). They are implemented now:
+  1. One clock, Malaysia Time. All three forecast/ensemble requests ask for
+     Asia/Kuala_Lumpur and the stamps are never parsed in the device zone, so "now",
+     the 48 h window, "today", the morning window and the IR alignment are the same
+     on any device. Times are tagged MYT. Check with:  node audit_time.js
+  2. Ensemble confidence is matched to the selected hour by TIMESTAMP, not by array
+     position. An hour the ensemble does not cover says so.
+  3. Every ensemble member is read (keys are enumerated from the response).
+  4. Offline fallback moves the whole view (pin, lat/lon fields, map) to the cached
+     place and the banner names that place and how old the cache is. The spot you
+     asked for stays saved and is retried on the next launch.
+  The cache key changed wa_cache -> wa_cache2; the first open refetches.
+  STILL NOT IN THE CODE, although described further down: -91 items 3, 5, 6, 7 and
+  the whole of -90 (isobars). Those sections are marked below.
+
 WHAT CHANGED (Bahasa Melayu)
   The app now speaks three languages: 中文, English and Bahasa Melayu. The first-launch
   picker offers all three, and the 🌐 button cycles 中文 -> EN -> BM. Every label,
@@ -61,7 +79,7 @@ WHAT CHANGED BEFORE THAT (locate on launch, was -93)
     - Permission denied / no signal at launch is not an error: the app keeps the last
       spot and says so in a quiet line.
 
-WHAT CHANGED IN -92 (Malaysia Standard Time)
+WHAT CHANGED IN -92 (Malaysia Standard Time)  [implemented in the review fixes above]
   Every clock in the app now reads MYT (UTC+8), whatever the device is set to and
   wherever the pin has been dropped. Before this there were TWO clocks on one screen
   and neither was labelled:
@@ -77,10 +95,9 @@ WHAT CHANGED IN -92 (Malaysia Standard Time)
   explanation panel and inside the WhatsApp text itself.
   Malaysia has no daylight saving, so the fixed +8 offset is exact, not an
   approximation - the same reasoning TyphoonWatch's myt() helper uses.
-  TO SHOW LOCATION-LOCAL TIME INSTEAD: set TZ back to 'auto' near the top of the
-  script; the helpers keep working, the label would then need changing.
 
 WHAT CHANGED IN -91 (bug fixes found auditing the pre-isobar code)
+  [items 1, 2 and 4 are implemented; items 3, 5, 6 and 7 are NOT in this index.html]
   1. Ensemble confidence read the WRONG HOUR. The panel indexed the ensemble arrays
      with the main grid's hour, but the main series is a 48-slot window opening ~2 h
      before now while the ensemble series always starts 00:00 today. At 3pm it was
@@ -105,7 +122,7 @@ WHAT CHANGED IN -91 (bug fixes found auditing the pre-isobar code)
      change on a second round-trip for an optional layer. It now loads after the
      first paint and re-renders when it lands.
 
-WHAT CHANGED IN -90
+WHAT CHANGED IN -90  [NOT in this index.html: there is no isobar layer in the code]
   Isobars, ported from 风眼 TyphoonWatch. New 〰 button next to the IR / 地点 buttons.
   - Marching squares over the ECMWF mean-sea-level pressure field. Draws the field
     and nothing else: no low is named, no circulation classified, no centre marked.
@@ -123,7 +140,5 @@ WHAT CHANGED IN -90
 
 NOTES
   - Data: ECMWF IFS via Open-Meteo (winds 0.25deg; CAPE/rain 9km HRES). Indicative.
-  - Isobars use pressure_msl from the same ECMWF endpoint, sampled with
-    cell_selection=nearest so sea grid-cells are not snapped to land.
   - Leaflet loads from unpkg CDN on first load (cached after by the service worker).
   - Storm/rain/wind thresholds are provisional — calibrate against field observations.
