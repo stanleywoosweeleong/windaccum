@@ -22,6 +22,16 @@ UPDATING
   the new version simply appears on the next launch.
   Check a change before pushing:  node --check sw.js
 
+WHAT CHANGED (text sized for phones)
+  - Body text is 16px and nearly everything else is about 1px larger; the smallest
+    notes went from 11px to 12.5px and long notes use the normal face, not monospace.
+  - Every text box (lat/lon, place search, WhatsApp text) is 16px, so iPhone no
+    longer zooms the page when one is tapped.
+  - Weight: the heaviest weight is kept for the big reading, the verdict and
+    headings; pills, badges and small labels dropped one step so small text is
+    crisper.
+  - Long Malay chip labels wrap to the next row instead of spilling off the card.
+
 WHAT CHANGED (light and dark mode)
   The app follows the phone's light / dark setting, and a button beside 🌐 overrides
   it: 🌓 auto (follow the phone) -> ☀️ light -> 🌙 dark. The choice is remembered.
