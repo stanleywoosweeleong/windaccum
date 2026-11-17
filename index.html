@@ -688,7 +688,7 @@ const I18N = {
     tag:"925 hPa 边界层风辐合 · MFC · ECMWF IFS 0.25°",
     geo:"当前位置", go:"查看", phLat:"纬度 3.155", phLon:"经度 102.400", refresh:"更新", wind:"925 风", rh:"MFC g/kg·h", pr:"上升* cm/s",
     tl:"48h 辐合（马时）· 点击或拖动", myt:"马时", tzNote:"所有时间均为马来西亚时间（马时，UTC+8），与手机时区及所选地点无关。",
-    cacheAt:"缓存位置", ensNoHour:"集合预报未涵盖此时段", share:"分享到 WhatsApp",
+    cacheAt:"缓存位置", limit:"预报服务请求已达上限，请稍后再试", updFail:"更新失败", showCached:"显示上次缓存", ensNoHour:"集合预报未涵盖此时段", share:"分享到 WhatsApp",
     shareTitle:"分享到 WhatsApp", shareNote:"可编辑后发送 · 供每日晨间广播使用", send:"发送", cancel:"取消",
     expH:"什么是风的累积？",
     langNext:"EN",
@@ -741,7 +741,7 @@ const I18N = {
     tag:"925 hPa boundary-layer convergence · MFC · ECMWF IFS 0.25°",
     geo:"Current location", go:"Go", phLat:"Latitude 3.155", phLon:"Longitude 102.400", refresh:"Refresh", wind:"925 wind", rh:"MFC g/kg·h", pr:"ascent* cm/s",
     tl:"48h outlook (MYT) · tap or drag", myt:"MYT", tzNote:"All times are Malaysia Time (MYT, UTC+8), whatever your phone's time zone or the place you picked.",
-    cacheAt:"cached for", ensNoHour:"The ensemble does not cover this hour", share:"Share to WhatsApp",
+    cacheAt:"cached for", limit:"Forecast service limit reached, try again later", updFail:"Update failed", showCached:"showing last cached", ensNoHour:"The ensemble does not cover this hour", share:"Share to WhatsApp",
     shareTitle:"Share to WhatsApp", shareNote:"Edit, then send · for your daily morning broadcast", send:"Send", cancel:"Cancel",
     expH:"What is wind accumulation?",
     langNext:"中",
@@ -794,7 +794,7 @@ const I18N = {
     tag:"Penumpuan lapisan sempadan 925 hPa · MFC · ECMWF IFS 0.25°",
     geo:"Lokasi semasa", go:"Lihat", phLat:"Latitud 3.155", phLon:"Longitud 102.400", refresh:"Kemas kini", wind:"Angin 925", rh:"MFC g/kg·j", pr:"naik* cm/s",
     tl:"Tinjauan 48j (MYT) · ketik atau seret", myt:"MYT", tzNote:"Semua masa ialah Waktu Malaysia (MYT, UTC+8), tanpa mengira zon waktu telefon atau tempat yang dipilih.",
-    cacheAt:"data untuk", ensNoHour:"Ensembel tidak meliputi jam ini", share:"Kongsi ke WhatsApp",
+    cacheAt:"data untuk", limit:"Had perkhidmatan ramalan dicapai, cuba lagi nanti", updFail:"Kemas kini gagal", showCached:"memaparkan data tersimpan terakhir", ensNoHour:"Ensembel tidak meliputi jam ini", share:"Kongsi ke WhatsApp",
     shareTitle:"Kongsi ke WhatsApp", shareNote:"Sunting, kemudian hantar · untuk siaran pagi harian anda", send:"Hantar", cancel:"Batal",
     expH:"Apakah itu penumpuan angin?",
     langNext:"中",
@@ -1096,7 +1096,7 @@ function initMap(){
     center.lat = +e.latlng.lat.toFixed(4); center.lon = +e.latlng.lng.toFixed(4);
     center.name = null; centerPin.setLatLng([center.lat,center.lon]);
     syncFields(); saveCenter(); fitGrid();
-    gpsInfo((T("已选定 · ","Selected · ","Dipilih · "))+center.lat+", "+center.lon);
+    { const la=center.lat, lo=center.lon; gpsInfo(()=>T("已选定 · ","Selected · ","Dipilih · ")+la+", "+lo); }
     loadData();
   });
   drawSeeds();
@@ -1138,7 +1138,7 @@ async function fetchElevation(lats, lons, signal){
 async function loadData(){
   if(inflight){ try{ inflight.abort(); }catch(e){} }
   const ac = new AbortController(); inflight = ac;
-  setStatus(true, I18N[lang].loading);
+  setStatus(true, ()=>I18N[lang].loading);
   document.getElementById('refreshBtn').disabled = true;
   const {lats,lons,pts} = gridCoords();
   // Winds/T/RH need pressure levels → IFS 0.25°. CAPE/precip are surface → sharper on IFS HRES 9km.
@@ -1153,7 +1153,7 @@ async function loadData(){
     + `&past_days=1&wind_speed_unit=ms&timezone=${TZ}`;
   try{
     const res = await fetch(url, {signal:ac.signal});
-    if(!res.ok) throw new Error("HTTP "+res.status);
+    if(!res.ok){ const e=new Error("HTTP "+res.status); e.status=res.status; throw e; }
     const json = await res.json();
     const arr = Array.isArray(json) ? json : [json];   // multi-point returns array
     // Window: start 2h before now so it lines up with the ~40-min-delayed IR loop; 48 hourly slots
@@ -1210,9 +1210,10 @@ async function loadData(){
   }catch(err){
     if(err && err.name==='AbortError') return;   // superseded by a newer request
     // fall back to cache — loud about it, never silent-stale
+    const why = failReason(err);
     const c = loadCache();
-    if(c) showCached(c);
-    else setStatus(false, "⚠ "+I18N[lang].failed);
+    if(c) showCached(c, why);
+    else setStatus(false, ()=>"⚠ "+(why.limit ? I18N[lang].limit : I18N[lang].failed));
   }finally{
     if(inflight===ac) inflight=null;
     document.getElementById('refreshBtn').disabled = false;
@@ -1234,7 +1235,20 @@ function agoText(ms){
 // The fetch failed, so the cached forecast is shown — and the WHOLE view moves to the place it
 // was made for (pin, lat/lon fields, map), with a banner naming that place and the cache age.
 // Nothing is saved: the spot the user asked for stays in storage and is retried next launch.
-function showCached(c){
+// Why the fetch failed, so the banner does not call a server refusal "offline".
+function failReason(err){
+  const st = err && err.status;
+  if(st===429) return {limit:true};                       // Open-Meteo's free request quota is used up
+  if(navigator.onLine===false) return {offline:true};     // the phone itself has no connection
+  return {http:st||0};                                     // connected, but the request failed
+}
+function failText(why){
+  const L=I18N[lang];
+  if(why && why.limit) return L.limit+" — "+L.showCached;
+  if(why && why.http!==undefined) return L.updFail+(why.http?" (HTTP "+why.http+")":"")+" — "+L.showCached;
+  return L.offline;
+}
+function showCached(c, why){
   center = { lat:c.center.lat, lon:c.center.lon, name:c.center.name||null };
   data = c.data; seriesCache=null;
   ensData=null; ensSig=null; confShown=false;
@@ -1245,7 +1259,7 @@ function showCached(c){
   const sl=document.getElementById('hourSlider'); sl.max=data.hours-1; sl.value=hourIdx;
   render();
   const where = center.name ? (center.name[lang]||center.name.en) : `${center.lat.toFixed(3)}, ${center.lon.toFixed(3)}`;
-  setStatus(false, "⚠ "+I18N[lang].offline+" · "+I18N[lang].cacheAt+" "+where+" · "+agoText(Date.now()-(c.at||0)));
+  setStatus(false, ()=>"⚠ "+failText(why)+" · "+I18N[lang].cacheAt+" "+where+" · "+agoText(Date.now()-(c.at||0)));
 }
 function nearestHourIndex(times){
   const now=Date.now();
@@ -1905,7 +1919,7 @@ function goManual(){
   const la=parseFloat(document.getElementById('inLat').value);
   const lo=parseFloat(document.getElementById('inLon').value);
   if(!isFinite(la)||!isFinite(lo)||la<-90||la>90||lo<-180||lo>180){
-    gpsInfo(T("请输入有效的经纬度","Enter a valid latitude & longitude","Masukkan latitud & longitud yang sah"), true);
+    gpsInfo(()=>T("请输入有效的经纬度","Enter a valid latitude & longitude","Masukkan latitud & longitud yang sah"), true);
     return;
   }
   cancelAutoLocate();
@@ -1921,10 +1935,10 @@ function cancelAutoLocate(){ if(autoLocating){ autoLocating=false; gpsInfo(""); 
 function useMyLocation(auto){
   auto = auto===true;
   if(!auto){ cancelAutoLocate(); }
-  if(!('geolocation' in navigator)){ if(!auto) gpsInfo(T("此设备不支持定位","Geolocation not supported","Peranti ini tidak menyokong lokasi"), true); return; }
+  if(!('geolocation' in navigator)){ if(!auto) gpsInfo(()=>T("此设备不支持定位","Geolocation not supported","Peranti ini tidak menyokong lokasi"), true); return; }
   const btn=document.getElementById('geoBtn');
   if(auto) autoLocating=true; else btn.disabled=true;
-  gpsInfo(T("定位中…","Locating…","Mengesan lokasi…"));
+  gpsInfo(()=>T("定位中…","Locating…","Mengesan lokasi…"));
   navigator.geolocation.getCurrentPosition(p=>{
     if(auto){
       if(!autoLocating) return;          // user picked a spot / pressed the button while we waited
@@ -1932,7 +1946,7 @@ function useMyLocation(auto){
     } else btn.disabled=false;
     const la=+p.coords.latitude.toFixed(4), lo=+p.coords.longitude.toFixed(4);
     const acc=p.coords.accuracy?Math.round(p.coords.accuracy):null;
-    const msg=acc?(T(`已定位 · 精度约 ${acc}米`,`Located · ~${acc}m accuracy`,`Lokasi dikesan · ketepatan ~${acc}m`)):(T("已定位","Located","Lokasi dikesan"));
+    const msg=()=>acc?(T(`已定位 · 精度约 ${acc}米`,`Located · ~${acc}m accuracy`,`Lokasi dikesan · ketepatan ~${acc}m`)):(T("已定位","Located","Lokasi dikesan"));
     // Launch fix that lands on the spot already showing: no need to refetch the forecast.
     const same = Math.abs(la-center.lat)<0.005 && Math.abs(lo-center.lon)<0.005;
     if(auto && same){ gpsInfo(msg); return; }
@@ -1946,23 +1960,25 @@ function useMyLocation(auto){
       if(!autoLocating) return;
       autoLocating=false;
       // Not an error state: the last saved spot is on screen and still valid.
-      gpsInfo(err.code===1
+      gpsInfo(()=>err.code===1
         ? (T("未获定位权限 · 显示上次位置","Location off · showing last spot","Lokasi dimatikan · memaparkan tempat terakhir"))
         : (T("暂时无法定位 · 显示上次位置","Couldn't locate · showing last spot","Lokasi tidak dapat dikesan · memaparkan tempat terakhir")));
       return;
     }
     btn.disabled=false;
-    const m={1:T("定位权限被拒绝，请在设置中启用","GPS permission denied — enable in Settings","Kebenaran lokasi ditolak — hidupkan dalam Tetapan"),
+    const m=()=>({1:T("定位权限被拒绝，请在设置中启用","GPS permission denied — enable in Settings","Kebenaran lokasi ditolak — hidupkan dalam Tetapan"),
              2:T("定位信号不可用，请到户外再试","GPS signal unavailable — try outdoors","Isyarat GPS tiada — cuba di luar bangunan"),
-             3:T("定位超时，请到开阔处再试","GPS timed out — try in an open area","GPS tamat masa — cuba di kawasan lapang")};
-    gpsInfo(m[err.code]||(T("定位失败","Location failed","Lokasi gagal dikesan")), true);
+             3:T("定位超时，请到开阔处再试","GPS timed out — try in an open area","GPS tamat masa — cuba di kawasan lapang")});
+    gpsInfo(()=>m()[err.code]||(T("定位失败","Location failed","Lokasi gagal dikesan")), true);
   }, auto ? {enableHighAccuracy:false, timeout:10000, maximumAge:300000}
           : {enableHighAccuracy:true, timeout:15000, maximumAge:0});
 }
 
+let gpsMsg=null;
 function gpsInfo(msg, err){
   const el=document.getElementById('gpsInfo');
-  el.textContent=msg||""; el.classList.toggle('err', !!err);
+  if(arguments.length){ gpsMsg=msg; el.classList.toggle('err', !!err); }   // no arguments = repaint in the current language
+  el.textContent=(typeof gpsMsg==='function' ? gpsMsg() : gpsMsg)||"";
 }
 
 /* ============ Isobars (ECMWF mean-sea-level pressure) ============
@@ -2316,6 +2332,7 @@ function applyLang(){
   document.getElementById('t-mslp').textContent = T('海平面气压','sea-level','aras laut');
   document.getElementById('isoBtn').title = T('等压线','Isobars','Isobar');
   themeBtnLabel();
+  paintStatus(); gpsInfo();
   document.getElementById('t-tl').textContent = L.tl;
   document.getElementById('t-exp-h').textContent = L.expH;
   document.getElementById('exp1').innerHTML = L.exp1;
@@ -2546,8 +2563,13 @@ function fmtTime(s){
   const day = mytDay(s)===mytToday() ? T('今天','Today','Hari ini') : days[mytDow(s)];
   return day+" "+mytHH(s)+" "+I18N[lang].myt;
 }
-function setStatus(spin,msg){
-  document.getElementById('status').innerHTML = (spin?'<span class="spin"></span>':'')+(msg||'');
+// msg may be a string or a function returning one. A function is kept and re-run when the
+// language changes, so a banner never stays behind in the previous language.
+let statusSpin=false, statusMsg=null;
+function setStatus(spin,msg){ statusSpin=spin; statusMsg=msg; paintStatus(); }
+function paintStatus(){
+  const m = typeof statusMsg==='function' ? statusMsg() : (statusMsg||'');
+  document.getElementById('status').innerHTML = (statusSpin?'<span class="spin"></span>':'')+m;
 }
 let toastT;
 function toast(m){ const el=document.getElementById('toast'); el.textContent=m; el.classList.add('show');

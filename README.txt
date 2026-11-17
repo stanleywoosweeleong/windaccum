@@ -22,6 +22,17 @@ UPDATING
   the new version simply appears on the next launch.
   Check a change before pushing:  node --check sw.js
 
+WHAT CHANGED (status line follows the language, and says why)
+  - The status banner and the location line under the coordinates are re-worded when
+    the language is switched. Before, a banner raised in Chinese stayed Chinese.
+  - "Offline" is now only shown when the phone has no connection. If Open-Meteo
+    refuses the request because its free quota is used up (HTTP 429) the banner says
+    "Forecast service limit reached"; any other failure says "Update failed".
+  NOTE ON THE QUOTA: Open-Meteo's free tier allows about 10,000 calls a day per
+  internet address, and every grid point counts as a call. One forecast load is 81
+  points, and switching isobars on adds 169, so roughly 100 loads a day from one
+  connection uses it up. It resets the next day.
+
 WHAT CHANGED (text sized for phones)
   - Body text is 16px and nearly everything else is about 1px larger; the smallest
     notes went from 11px to 12.5px and long notes use the normal face, not monospace.
